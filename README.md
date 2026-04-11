@@ -6,7 +6,7 @@ A Go project template.
 
 ### Prerequisites
 
-- [Go](https://golang.org/dl/) 1.21 or later
+- [Go](https://golang.org/dl/) 1.24 or later
 
 ### Clone
 
