@@ -5,7 +5,8 @@
 // applying the same projection twice yields the same result.
 //
 // Categorically, a projection query q defines an idempotent endofunctor:
-//   P_q : Repo_Sigma -> Repo_Sigma    with    P_q . P_q ~= P_q
+//
+//	P_q : Repo_Sigma -> Repo_Sigma    with    P_q . P_q ~= P_q
 //
 // Imports: internal/graph, internal/identity.
 // Must not import: governance, verification, composition, repo.

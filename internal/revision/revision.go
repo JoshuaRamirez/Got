@@ -6,7 +6,9 @@
 // records the audit trail of each applied rewrite.
 //
 // Categorically, a change capsule is:
-//   p = (L <-l- K -r-> R, lambda)
+//
+//	p = (L <-l- K -r-> R, lambda)
+//
 // and application is the standard DPO construction when the pushout complement
 // exists and side conditions hold.
 //

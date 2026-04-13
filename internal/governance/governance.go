@@ -5,7 +5,9 @@
 // against a frontier and computes outstanding obligations.
 //
 // Categorically, for a policy set Pi, governance defines the full subcategory:
-//   Repo_Pi subset Repo_Sigma
+//
+//	Repo_Pi subset Repo_Sigma
+//
 // consisting of all objects and morphisms that satisfy Pi.
 //
 // Imports: internal/graph, internal/projection, internal/identity.

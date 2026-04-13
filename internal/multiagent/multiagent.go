@@ -4,7 +4,8 @@
 // It answers questions like "who authored this vertex?" and "what is the
 // full responsibility chain for this artifact?"
 //
-// Imports: internal/graph, internal/provenance, internal/identity.
+// Imports: internal/graph, internal/identity.
+// Must not import: revision or any higher orchestration package.
 package multiagent
 
 import (

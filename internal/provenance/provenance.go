@@ -5,7 +5,9 @@
 // between causally related vertices.
 //
 // Categorically, provenance induces a closure operator on the subobject poset:
-//   cl^prov_G : Sub(G) -> Sub(G)
+//
+//	cl^prov_G : Sub(G) -> Sub(G)
+//
 // satisfying extensivity, monotonicity, and idempotence.
 //
 // Imports: internal/graph, internal/identity.

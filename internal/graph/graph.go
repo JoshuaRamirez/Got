@@ -42,10 +42,10 @@ type Vertex struct {
 
 // Edge is a typed, attributed directed link between two vertices.
 type Edge struct {
-	ID   identity.EdgeID
-	Type ontology.EdgeType
-	From identity.VertexID
-	To   identity.VertexID
+	ID    identity.EdgeID
+	Type  ontology.EdgeType
+	From  identity.VertexID
+	To    identity.VertexID
 	Attrs AttrMap
 }
 

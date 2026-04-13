@@ -6,6 +6,7 @@
 // independently guarantees.
 //
 // Imports: internal/graph, internal/governance, internal/verification, internal/projection.
+// Must not import: composition, realization, or repo.
 package capability
 
 import (
