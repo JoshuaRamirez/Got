@@ -19,6 +19,7 @@ import (
 	"github.com/joshuaramirez/got/internal/composition"
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
+	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/namespace"
 	"github.com/joshuaramirez/got/internal/projection"
 	"github.com/joshuaramirez/got/internal/realization"
@@ -43,8 +44,8 @@ type Service interface {
 	// Revise applies a DPO rewrite rule to the graph.
 	Revise(State, revision.Rule, revision.Match) (State, error)
 
-	// Branch creates a new named branch pointing at the given attributes.
-	Branch(State, namespace.RefName, graph.AttrMap) (State, error)
+	// Branch creates or updates a named branch pointing at the given vertex.
+	Branch(State, namespace.RefName, identity.VertexID) (State, error)
 
 	// Merge computes the guarded pushout of two frontiers under governance.
 	Merge(State, projection.Frontier, projection.Frontier, []governance.Policy) (State, composition.MergeResult, error)

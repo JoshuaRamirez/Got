@@ -22,10 +22,15 @@ import (
 // TransformKind classifies the nature of a graph rewrite.
 type TransformKind string
 
-// Match is a marker interface for a morphism from a rule's left-hand side
-// into the host graph (categorically, a mono m : L -> G).
+// Match is a morphism from a rule's left-hand side into the host graph
+// (categorically, a mono m : L -> G). It provides the injective vertex map
+// that the revision Engine uses to locate the consumed pattern inside the
+// host graph before applying the DPO rewrite.
 type Match interface {
-	isMatch()
+	// Mapping returns the injective vertex map: each key is a vertex ID from
+	// the rule's left-hand side (L), and the corresponding value is its image
+	// in the host graph (G).
+	Mapping() map[identity.VertexID]identity.VertexID
 }
 
 // Rule is a DPO rewrite rule with side conditions.

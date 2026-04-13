@@ -59,9 +59,11 @@ type Hyperedge struct {
 	Attrs   AttrMap
 }
 
-// Query is a marker interface for graph query objects.
+// Query is an interface for graph query objects. Implementations describe a
+// selection criterion that Graph.Query evaluates against the graph.
 type Query interface {
-	isQuery()
+	// QueryKind returns a string identifier for the type of query.
+	QueryKind() string
 }
 
 // Subgraph is a read-only view of a subset of a graph.
