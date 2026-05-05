@@ -8,9 +8,15 @@
 package temporal
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
 )
+
+// ErrUnknownVertex is returned when a referenced vertex is not in the graph.
+var ErrUnknownVertex = errors.New("temporal: unknown vertex")
 
 // Interval is a half-open time range [From, To).
 type Interval struct {
@@ -21,8 +27,8 @@ type Interval struct {
 // Engine answers temporal queries about graph vertices.
 type Engine interface {
 	// Validity returns the validity interval of the identified vertex.
-	Validity(g graph.Graph, id identity.VertexID) (Interval, error)
+	Validity(ctx context.Context, g graph.Graph, id identity.VertexID) (Interval, error)
 
 	// Fresh returns true if the vertex's validity interval contains 'now'.
-	Fresh(g graph.Graph, id identity.VertexID, now int64) (bool, error)
+	Fresh(ctx context.Context, g graph.Graph, id identity.VertexID, now int64) (bool, error)
 }

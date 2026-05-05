@@ -1,6 +1,10 @@
 package namespace
 
-import "github.com/joshuaramirez/got/internal/identity"
+import (
+	"context"
+
+	"github.com/joshuaramirez/got/internal/identity"
+)
 
 // memStore is an in-memory implementation of Store.
 // It is the sole mutable component in the architecture.
@@ -19,32 +23,32 @@ func NewStore() Store {
 	}
 }
 
-func (s *memStore) BindRef(name RefName, id identity.VertexID) error {
+func (s *memStore) BindRef(_ context.Context, name RefName, id identity.VertexID) error {
 	s.refs[name] = id
 	return nil
 }
 
-func (s *memStore) ResolveRef(name RefName) (identity.VertexID, bool) {
+func (s *memStore) ResolveRef(_ context.Context, name RefName) (identity.VertexID, bool) {
 	id, ok := s.refs[name]
 	return id, ok
 }
 
-func (s *memStore) BindAlias(name Alias, id identity.VertexID) error {
+func (s *memStore) BindAlias(_ context.Context, name Alias, id identity.VertexID) error {
 	s.aliases[name] = id
 	return nil
 }
 
-func (s *memStore) ResolveAlias(name Alias) (identity.VertexID, bool) {
+func (s *memStore) ResolveAlias(_ context.Context, name Alias) (identity.VertexID, bool) {
 	id, ok := s.aliases[name]
 	return id, ok
 }
 
-func (s *memStore) BindProjection(name ProjectionHandle, id identity.VertexID) error {
+func (s *memStore) BindProjection(_ context.Context, name ProjectionHandle, id identity.VertexID) error {
 	s.projs[name] = id
 	return nil
 }
 
-func (s *memStore) ResolveProjection(name ProjectionHandle) (identity.VertexID, bool) {
+func (s *memStore) ResolveProjection(_ context.Context, name ProjectionHandle) (identity.VertexID, bool) {
 	id, ok := s.projs[name]
 	return id, ok
 }

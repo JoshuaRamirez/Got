@@ -16,10 +16,23 @@
 package verification
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/projection"
+)
+
+var (
+	// ErrCertificationFailed indicates Certify could not issue a certificate
+	// because policy obligations were not all discharged.
+	ErrCertificationFailed = errors.New("verification: certification failed")
+
+	// ErrEnvironmentMismatch indicates the supplied EnvironmentBinding does
+	// not match the requested evaluation context.
+	ErrEnvironmentMismatch = errors.New("verification: environment mismatch")
 )
 
 // EnvironmentBinding identifies a specific execution environment.
@@ -68,12 +81,13 @@ type Certificate interface {
 // Engine performs evaluations, proves claims, and issues certificates.
 type Engine interface {
 	// Evaluate runs an evaluation of the frontier in the given environment.
-	Evaluate(g graph.Graph, f projection.Frontier, env EnvironmentBinding) (Evaluation, error)
+	Evaluate(ctx context.Context, g graph.Graph, f projection.Frontier, env EnvironmentBinding) (Evaluation, error)
 
 	// Prove checks whether the given proof validates the given claim.
-	Prove(g graph.Graph, c Claim, p Proof) (bool, error)
+	Prove(ctx context.Context, g graph.Graph, c Claim, p Proof) (bool, error)
 
 	// Certify attempts to issue a certificate for the frontier, given a set
-	// of evaluations and policies. Returns nil if obligations are not met.
-	Certify(g graph.Graph, f projection.Frontier, evals []Evaluation, ps []governance.Policy) (Certificate, error)
+	// of evaluations and policies. Returns ErrCertificationFailed if
+	// obligations are not met.
+	Certify(ctx context.Context, g graph.Graph, f projection.Frontier, evals []Evaluation, ps []governance.Policy) (Certificate, error)
 }

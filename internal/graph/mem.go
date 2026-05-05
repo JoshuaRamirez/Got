@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	ErrVertexNotFound  = errors.New("vertex not found")
-	ErrMissingEndpoint = errors.New("edge endpoint not in graph")
-	ErrNotWellFormed   = errors.New("graph is not well-formed")
+	ErrVertexNotFound   = errors.New("vertex not found")
+	ErrMissingEndpoint  = errors.New("edge endpoint not in graph")
+	ErrNotWellFormed    = errors.New("graph is not well-formed")
 	ErrQueryUnsupported = errors.New("unsupported query type")
 )
 

@@ -19,17 +19,25 @@
 package realization
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/projection"
 )
+
+// ErrTargetUnsupported indicates the requested Target has no registered
+// materializer.
+var ErrTargetUnsupported = errors.New("realization: target unsupported")
 
 // Target names the output format or destination for materialization.
 type Target string
 
 // FidelityContract describes the guarantees a bundle provides about
-// faithfulness to the source projection.
-type FidelityContract interface {
-	Name() string
+// faithfulness to the source projection. Per docs/design-rules.md it is a
+// struct (single-getter data holder).
+type FidelityContract struct {
+	Name string
 }
 
 // Bundle is the materialized output of a projection for a given target.
@@ -46,5 +54,5 @@ type Bundle interface {
 
 // Engine materializes projected views into target bundles.
 type Engine interface {
-	Materialize(v projection.View, target Target) (Bundle, error)
+	Materialize(ctx context.Context, v projection.View, target Target) (Bundle, error)
 }

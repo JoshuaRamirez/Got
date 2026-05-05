@@ -36,9 +36,9 @@ var admissibleEdges = map[edgeTriple]bool{
 	{Artifact, DerivedFrom, Revision}: true,
 
 	// Execution
-	{Execution, Executes, Model}:       true,
-	{Execution, Executes, Tool}:        true,
-	{Execution, DerivedFrom, Prompt}:   true,
+	{Execution, Executes, Model}:        true,
+	{Execution, Executes, Tool}:         true,
+	{Execution, DerivedFrom, Prompt}:    true,
 	{Execution, Materializes, Artifact}: true,
 
 	// Evaluation

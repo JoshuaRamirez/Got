@@ -13,9 +13,16 @@
 package projection
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
 )
+
+// ErrInvalidSelector is returned when a Selector cannot be evaluated against
+// the given graph.
+var ErrInvalidSelector = errors.New("projection: invalid selector")
 
 // Selector chooses a frontier from a graph. A branch selector is a particular
 // kind of Selector — not a pointer, but a chosen frontier.
@@ -48,8 +55,8 @@ type View interface {
 // Axiom: closedView(G, p) subset provClose(G, vertexIDs(project(G, p))).
 type Engine interface {
 	// Select evaluates a Selector against the graph and returns the frontier.
-	Select(g graph.Graph, s Selector) (Frontier, error)
+	Select(ctx context.Context, g graph.Graph, s Selector) (Frontier, error)
 
 	// Project applies a full projection Spec to the graph and returns a View.
-	Project(g graph.Graph, s Spec) (View, error)
+	Project(ctx context.Context, g graph.Graph, s Spec) (View, error)
 }

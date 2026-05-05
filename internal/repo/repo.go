@@ -20,6 +20,9 @@
 package repo
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/composition"
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
@@ -30,6 +33,17 @@ import (
 	"github.com/joshuaramirez/got/internal/revision"
 	"github.com/joshuaramirez/got/internal/verification"
 )
+
+// ErrIngestRejected indicates Ingest could not accept the supplied payload.
+var ErrIngestRejected = errors.New("repo: ingest rejected")
+
+// Payload is the typed input to Ingest. Concrete payload types (e.g.
+// VertexPayload, EdgePayload, BulkPayload) implement this interface and
+// supply their own typed fields. The PayloadKind discriminator mirrors the
+// pattern used by graph.Query.
+type Payload interface {
+	PayloadKind() string
+}
 
 // State is the composite repository state: an immutable graph plus a mutable
 // namespace shell.
@@ -43,23 +57,23 @@ type State interface {
 // while only the namespace component is mutated in place.
 type Service interface {
 	// Ingest adds raw payload data to the graph as new vertices.
-	Ingest(State, any) (State, error)
+	Ingest(ctx context.Context, s State, p Payload) (State, error)
 
 	// Revise applies a DPO rewrite rule to the graph.
-	Revise(State, revision.Rule, revision.Match) (State, error)
+	Revise(ctx context.Context, s State, r revision.Rule, m revision.Match) (State, error)
 
 	// Branch creates or updates a named branch pointing at the given vertex.
-	Branch(State, namespace.RefName, identity.VertexID) (State, error)
+	Branch(ctx context.Context, s State, name namespace.RefName, target identity.VertexID) (State, error)
 
 	// Merge computes the guarded pushout of two frontiers under governance.
-	Merge(State, projection.Frontier, projection.Frontier, []governance.Policy) (State, composition.MergeResult, error)
+	Merge(ctx context.Context, s State, left, right projection.Frontier, ps []governance.Policy) (State, composition.MergeResult, error)
 
 	// Evaluate runs an evaluation of a frontier in a given environment.
-	Evaluate(State, projection.Frontier, verification.EnvironmentBinding) (State, verification.Evaluation, error)
+	Evaluate(ctx context.Context, s State, f projection.Frontier, env verification.EnvironmentBinding) (State, verification.Evaluation, error)
 
 	// Materialize produces a target bundle from a projected view of the graph.
-	Materialize(State, projection.Spec, realization.Target) (realization.Bundle, error)
+	Materialize(ctx context.Context, s State, spec projection.Spec, target realization.Target) (realization.Bundle, error)
 
 	// Release gates a frontier for release under the given policies.
-	Release(State, projection.Frontier, []governance.Policy) (State, error)
+	Release(ctx context.Context, s State, f projection.Frontier, ps []governance.Policy) (State, error)
 }

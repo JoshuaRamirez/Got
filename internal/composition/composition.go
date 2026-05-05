@@ -20,11 +20,24 @@
 package composition
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/projection"
 	"github.com/joshuaramirez/got/internal/verification"
+)
+
+var (
+	// ErrConflictUnresolvable indicates a Resolve call could not fully
+	// discharge the supplied conflicts.
+	ErrConflictUnresolvable = errors.New("composition: conflict unresolvable")
+
+	// ErrNoPushout indicates Merge cannot construct a guarded pushout under
+	// the supplied policies.
+	ErrNoPushout = errors.New("composition: no admissible pushout")
 )
 
 // ConflictKind classifies the nature of a merge conflict.
@@ -53,9 +66,10 @@ type Resolution interface {
 	Apply(g graph.Graph) (graph.Graph, error)
 }
 
-// MergeWitness is a vertex that attests to a completed merge.
-type MergeWitness interface {
-	ID() identity.VertexID
+// MergeWitness is a vertex that attests to a completed merge. Per
+// docs/design-rules.md it is a struct (single-getter data holder).
+type MergeWitness struct {
+	ID identity.VertexID
 }
 
 // MergeResult holds the outcome of a merge operation.
@@ -74,9 +88,9 @@ type Engine interface {
 	// Merge computes the guarded pushout of two frontiers under the given
 	// policies. Returns either a merged frontier (with witness and certificate)
 	// or a set of typed conflicts — never both.
-	Merge(g graph.Graph, left, right projection.Frontier, ps []governance.Policy) (MergeResult, error)
+	Merge(ctx context.Context, g graph.Graph, left, right projection.Frontier, ps []governance.Policy) (MergeResult, error)
 
 	// Resolve attempts to apply a set of resolutions to an existing conflict
 	// result, producing a new MergeResult.
-	Resolve(g graph.Graph, mr MergeResult, rs []Resolution) (MergeResult, error)
+	Resolve(ctx context.Context, g graph.Graph, mr MergeResult, rs []Resolution) (MergeResult, error)
 }

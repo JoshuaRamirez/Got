@@ -10,19 +10,27 @@
 package replay
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/revision"
 	"github.com/joshuaramirez/got/internal/verification"
 )
 
+// ErrNonDeterministic indicates a replay produced a different outcome from
+// the original execution.
+var ErrNonDeterministic = errors.New("replay: non-deterministic outcome")
+
 // Outcome reports whether a replayed capsule produced a deterministic result.
-type Outcome interface {
-	Deterministic() bool
+// Per docs/design-rules.md it is a struct (single-getter data holder).
+type Outcome struct {
+	Deterministic bool
 }
 
 // Engine replays change capsules.
 type Engine interface {
 	// Replay re-executes the change capsule c against graph g in the given
 	// environment and reports whether the outcome is deterministic.
-	Replay(g graph.Graph, c revision.ChangeCapsule, env verification.EnvironmentBinding) (Outcome, error)
+	Replay(ctx context.Context, g graph.Graph, c revision.ChangeCapsule, env verification.EnvironmentBinding) (Outcome, error)
 }

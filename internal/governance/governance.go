@@ -15,9 +15,16 @@
 package governance
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/projection"
 )
+
+// ErrPolicyViolation is returned when a policy aggregate decision is Unsat
+// at a release gate or other hard policy boundary.
+var ErrPolicyViolation = errors.New("governance: policy violation")
 
 // Decision is the three-valued outcome of a policy check.
 type Decision uint8
@@ -40,6 +47,10 @@ type Obligation struct {
 
 // Policy is a named governance rule that can be checked against a frontier.
 //
+// Per docs/design-rules.md, Policy is a value type (a rule), not an Engine,
+// so its Check method does not take context.Context. The Engine that runs
+// policies is responsible for honoring cancellation.
+//
 // Axiom: admissible(G, F, Ps) = true <=> check(G, F, Ps) = Sat.
 type Policy interface {
 	Name() string
@@ -52,9 +63,9 @@ type Policy interface {
 type Engine interface {
 	// Check evaluates all policies against the frontier and returns the
 	// aggregate decision along with any outstanding obligations.
-	Check(g graph.Graph, f projection.Frontier, ps []Policy) (Decision, []Obligation, error)
+	Check(ctx context.Context, g graph.Graph, f projection.Frontier, ps []Policy) (Decision, []Obligation, error)
 
 	// GateRelease checks whether the frontier is eligible for release
 	// under the given policies. A true result implies Check returns Sat.
-	GateRelease(g graph.Graph, f projection.Frontier, ps []Policy) (bool, []Obligation, error)
+	GateRelease(ctx context.Context, g graph.Graph, f projection.Frontier, ps []Policy) (bool, []Obligation, error)
 }

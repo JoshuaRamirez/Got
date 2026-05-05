@@ -17,8 +17,21 @@
 package revision
 
 import (
+	"context"
+	"errors"
+
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
+)
+
+var (
+	// ErrSideConditionFailed indicates a Rule's side condition did not hold
+	// at the supplied match.
+	ErrSideConditionFailed = errors.New("revision: side condition failed")
+
+	// ErrNoMatch indicates a Rule could not be applied because the match did
+	// not embed into the host graph.
+	ErrNoMatch = errors.New("revision: no valid match")
 )
 
 // TransformKind classifies the nature of a graph rewrite.
@@ -76,9 +89,9 @@ type ChangeCapsule struct {
 type Engine interface {
 	// Apply executes a DPO rewrite of rule r at match m in graph g.
 	// Returns the rewritten graph and the change capsule recording the rewrite.
-	Apply(g graph.Graph, r Rule, m Match) (graph.Graph, ChangeCapsule, error)
+	Apply(ctx context.Context, g graph.Graph, r Rule, m Match) (graph.Graph, ChangeCapsule, error)
 
 	// Replayable checks whether the change capsule c can be replayed on graph g
 	// (i.e., consumed vertices exist and produced vertices are present).
-	Replayable(g graph.Graph, c ChangeCapsule) error
+	Replayable(ctx context.Context, g graph.Graph, c ChangeCapsule) error
 }

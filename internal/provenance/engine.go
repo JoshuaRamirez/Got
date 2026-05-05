@@ -1,6 +1,8 @@
 package provenance
 
 import (
+	"context"
+
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/ontology"
@@ -26,8 +28,6 @@ func NewEngine(causalEdges map[ontology.EdgeType]bool) Engine {
 	return &bfsEngine{causal: c}
 }
 
-// buildAdj constructs an undirected adjacency list from all causal edges
-// and causal hyperedges in the graph.
 func (e *bfsEngine) buildAdj(g graph.Graph) map[identity.VertexID][]identity.VertexID {
 	adj := make(map[identity.VertexID][]identity.VertexID)
 
@@ -43,7 +43,6 @@ func (e *bfsEngine) buildAdj(g graph.Graph) map[identity.VertexID][]identity.Ver
 		if !e.causal[h.Type] {
 			continue
 		}
-		// Connect every input to every output (undirected).
 		for _, in := range h.Inputs {
 			for _, out := range h.Outputs {
 				adj[in] = append(adj[in], out)
@@ -55,8 +54,7 @@ func (e *bfsEngine) buildAdj(g graph.Graph) map[identity.VertexID][]identity.Ver
 	return adj
 }
 
-// Causes returns true if from and to are connected via causal edges.
-func (e *bfsEngine) Causes(g graph.Graph, from, to identity.VertexID) (bool, error) {
+func (e *bfsEngine) Causes(ctx context.Context, g graph.Graph, from, to identity.VertexID) (bool, error) {
 	if from == to {
 		return true, nil
 	}
@@ -65,6 +63,9 @@ func (e *bfsEngine) Causes(g graph.Graph, from, to identity.VertexID) (bool, err
 	queue := []identity.VertexID{from}
 
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		cur := queue[0]
 		queue = queue[1:]
 		for _, nb := range adj[cur] {
@@ -80,20 +81,12 @@ func (e *bfsEngine) Causes(g graph.Graph, from, to identity.VertexID) (bool, err
 	return false, nil
 }
 
-// Cone returns the provenance cone of seed: all vertices reachable via causal
-// edges. Equivalent to Close with a singleton seed set.
-//
 // Axiom: provCone(G, v) = provClose(G, {v}).
-func (e *bfsEngine) Cone(g graph.Graph, seed identity.VertexID) ([]identity.VertexID, error) {
-	return e.Close(g, []identity.VertexID{seed})
+func (e *bfsEngine) Cone(ctx context.Context, g graph.Graph, seed identity.VertexID) ([]identity.VertexID, error) {
+	return e.Close(ctx, g, []identity.VertexID{seed})
 }
 
-// Close computes the provenance closure of the seed set.
-//
-// Axiom: S subset Close(G, S)                               — extensive
-// Axiom: S1 subset S2 => Close(G, S1) subset Close(G, S2)   — monotone
-// Axiom: Close(G, Close(G, S)) = Close(G, S)                — idempotent
-func (e *bfsEngine) Close(g graph.Graph, seed []identity.VertexID) ([]identity.VertexID, error) {
+func (e *bfsEngine) Close(ctx context.Context, g graph.Graph, seed []identity.VertexID) ([]identity.VertexID, error) {
 	adj := e.buildAdj(g)
 	visited := make(map[identity.VertexID]bool, len(seed))
 	queue := make([]identity.VertexID, 0, len(seed))
@@ -106,6 +99,9 @@ func (e *bfsEngine) Close(g graph.Graph, seed []identity.VertexID) ([]identity.V
 	}
 
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		cur := queue[0]
 		queue = queue[1:]
 		for _, nb := range adj[cur] {
@@ -123,41 +119,39 @@ func (e *bfsEngine) Close(g graph.Graph, seed []identity.VertexID) ([]identity.V
 	return result, nil
 }
 
-// TraceSet returns all simple paths between from and to through causal edges.
-func (e *bfsEngine) TraceSet(g graph.Graph, from, to identity.VertexID) ([]Trace, error) {
+func (e *bfsEngine) TraceSet(ctx context.Context, g graph.Graph, from, to identity.VertexID) ([]Trace, error) {
 	adj := e.buildAdj(g)
 	var traces []Trace
 	visited := map[identity.VertexID]bool{from: true}
 	path := []identity.VertexID{from}
 
-	var dfs func(cur identity.VertexID)
-	dfs = func(cur identity.VertexID) {
+	var dfs func(cur identity.VertexID) error
+	dfs = func(cur identity.VertexID) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if cur == to {
 			p := make([]identity.VertexID, len(path))
 			copy(p, path)
-			traces = append(traces, &simpleTrace{vertices: p})
-			return
+			traces = append(traces, Trace{Vertices: p})
+			return nil
 		}
 		for _, nb := range adj[cur] {
 			if !visited[nb] {
 				visited[nb] = true
 				path = append(path, nb)
-				dfs(nb)
+				if err := dfs(nb); err != nil {
+					return err
+				}
 				path = path[:len(path)-1]
 				visited[nb] = false
 			}
 		}
+		return nil
 	}
-	dfs(from)
+	if err := dfs(from); err != nil {
+		return nil, err
+	}
 
 	return traces, nil
-}
-
-// simpleTrace is a concrete Trace: an ordered sequence of vertex IDs.
-type simpleTrace struct {
-	vertices []identity.VertexID
-}
-
-func (t *simpleTrace) Vertices() []identity.VertexID {
-	return t.vertices
 }

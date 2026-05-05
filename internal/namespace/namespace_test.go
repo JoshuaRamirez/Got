@@ -1,6 +1,7 @@
 package namespace_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -14,13 +15,14 @@ func vid(s string) identity.VertexID {
 
 // Axiom: resolveRef(bindRef(N, r, v), r) = some(v).
 func TestBindResolveRef(t *testing.T) {
+	ctx := context.Background()
 	s := namespace.NewStore()
 	v := vid("target")
 
-	if err := s.BindRef("main", v); err != nil {
+	if err := s.BindRef(ctx, "main", v); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := s.ResolveRef("main")
+	got, ok := s.ResolveRef(ctx, "main")
 	if !ok {
 		t.Fatal("ResolveRef returned false after BindRef")
 	}
@@ -31,13 +33,14 @@ func TestBindResolveRef(t *testing.T) {
 
 // Axiom: resolveAlias(bindAlias(N, a, v), a) = some(v).
 func TestBindResolveAlias(t *testing.T) {
+	ctx := context.Background()
 	s := namespace.NewStore()
 	v := vid("release-1")
 
-	if err := s.BindAlias("v1.0", v); err != nil {
+	if err := s.BindAlias(ctx, "v1.0", v); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := s.ResolveAlias("v1.0")
+	got, ok := s.ResolveAlias(ctx, "v1.0")
 	if !ok {
 		t.Fatal("ResolveAlias returned false after BindAlias")
 	}
@@ -48,28 +51,30 @@ func TestBindResolveAlias(t *testing.T) {
 
 // Unbound names return false.
 func TestResolveUnbound(t *testing.T) {
+	ctx := context.Background()
 	s := namespace.NewStore()
-	if _, ok := s.ResolveRef("nonexistent"); ok {
+	if _, ok := s.ResolveRef(ctx, "nonexistent"); ok {
 		t.Fatal("unbound ref should return false")
 	}
-	if _, ok := s.ResolveAlias("nonexistent"); ok {
+	if _, ok := s.ResolveAlias(ctx, "nonexistent"); ok {
 		t.Fatal("unbound alias should return false")
 	}
-	if _, ok := s.ResolveProjection("nonexistent"); ok {
+	if _, ok := s.ResolveProjection(ctx, "nonexistent"); ok {
 		t.Fatal("unbound projection should return false")
 	}
 }
 
 // Rebinding overwrites the previous value.
 func TestRebind(t *testing.T) {
+	ctx := context.Background()
 	s := namespace.NewStore()
 	v1 := vid("first")
 	v2 := vid("second")
 
-	s.BindRef("main", v1)
-	s.BindRef("main", v2)
+	s.BindRef(ctx, "main", v1)
+	s.BindRef(ctx, "main", v2)
 
-	got, ok := s.ResolveRef("main")
+	got, ok := s.ResolveRef(ctx, "main")
 	if !ok || got != v2 {
 		t.Fatalf("rebind should overwrite: got %v, want %v", got, v2)
 	}
@@ -77,13 +82,14 @@ func TestRebind(t *testing.T) {
 
 // Projection handle binding.
 func TestBindResolveProjection(t *testing.T) {
+	ctx := context.Background()
 	s := namespace.NewStore()
 	v := vid("proj-target")
 
-	if err := s.BindProjection("default-view", v); err != nil {
+	if err := s.BindProjection(ctx, "default-view", v); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := s.ResolveProjection("default-view")
+	got, ok := s.ResolveProjection(ctx, "default-view")
 	if !ok {
 		t.Fatal("ResolveProjection returned false after BindProjection")
 	}
