@@ -8,6 +8,12 @@ Documentation layout and writing rules.
   new and refactored code. Cite section numbers when applying a rule.
 - `devlog/` — chronological journal, one file per UTC day. Convention lives
   in `devlog/CLAUDE.md`; do not change the format without updating that file.
+- `use-cases/` — Cockburn-style use case catalogue. User goals (sea level)
+  in `user/`, sub-function operations (fish level) in `system/`.
+  Convention and template in `use-cases/CLAUDE.md` and `use-cases/template.md`;
+  the catalogue index is `use-cases/index.md`. When adding or changing a
+  public method on any internal Engine or Service, update the relevant UC
+  in the same change.
 
 ## Where things go
 
@@ -15,6 +21,8 @@ Documentation layout and writing rules.
 |---|---|
 | A new design rule or change to an existing one | `design-rules.md` |
 | A decision made during a session, with rationale | `devlog/YYYY-MM-DD.md` |
+| A user-observable goal the system serves | `use-cases/user/UC-U<NN>-...md` |
+| An internal sub-function operation | `use-cases/system/UC-S<NN>-...md` |
 | User-facing setup or build instructions | `/README.md` |
 | Sandbox-only manual tasks Claude can't do | `/CLAUDE.md` |
 | Per-package categorical role / allowed imports | the `package X` doc-comment in code |
