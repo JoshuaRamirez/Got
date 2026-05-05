@@ -12,9 +12,15 @@ Two layers:
 - `system/` — sub-function use cases (fish level): an internal operation
   that supports one or more user use cases.
 
-Status of every UC lives in `ledger.md`. The `/use-case` slash command
-(see `.claude/skills/use-case/SKILL.md`) automates the common operations
-on this catalogue.
+Two siblings track plan state:
+
+- `ledger.md` — what is done and where each UC stands.
+- `roadmap.md` — what to do next and why that order.
+
+Together they encode the full plan at any moment. The `/use-case` slash
+command (see `.claude/skills/use-case/SKILL.md`) automates the common
+operations on this catalogue, including `/use-case roadmap` and
+`/use-case next`.
 
 Every use case has a stable ID:
 
@@ -75,3 +81,17 @@ Update it in the same commit that changes implementation or test coverage:
 
 Status definitions live in `ledger.md`. The only status that satisfies the
 test-gating rule in `/docs/design-rules.md` is `Verified`.
+
+## Roadmap
+
+`roadmap.md` records the optimal dependency-ordered implementation chain
+for moving every UC from `Specified` to `Verified`. Update it when:
+
+1. A package's UCs all move to `Verified` in the ledger — refresh
+   "Current focus" to point at the next active phase.
+2. The dependency graph changes (new package added, deps revised) —
+   re-stratify the phases and update the diagram.
+3. A phase completes — move that block above "Active phase".
+
+Do not re-order phases without a corresponding architecture change. The
+order is determined by package imports, not preference.

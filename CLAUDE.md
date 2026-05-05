@@ -44,7 +44,10 @@ level).
 ## Canonical references
 
 - `/docs/requirements/use-cases/index.md` — full UC catalogue index.
-- `/docs/requirements/use-cases/ledger.md` — UC implementation/verification status.
+- `/docs/requirements/use-cases/ledger.md` — UC implementation /
+  verification status (what is done).
+- `/docs/requirements/use-cases/roadmap.md` — UC implementation order
+  (what to do next, by dependency layer).
 - `/docs/design-rules.md` — full API design rules with rationale.
 - `/docs/devlog/YYYY-MM-DD.md` — chronological journal.
 - `/README.md` — user-facing setup / build / test.
