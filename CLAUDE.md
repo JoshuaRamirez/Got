@@ -1,15 +1,24 @@
 # Claude Code Notes
 
-## Outstanding Manual Tasks
+This file is the root index. Scoped rules live in per-folder `CLAUDE.md`
+files; consult the one closest to the code you are touching.
 
-### CI: gofmt format check
+## Folder map
 
-`.github/workflows/ci.yml` includes a `Format check` step that runs
-`test -z "$(gofmt -l .)"`. If a sandboxed agent without `workflow` OAuth
-scope edits the workflow file, it will need to be applied manually.
+- `/internal/CLAUDE.md` — API rules for internal packages (context, errors,
+  struct-vs-interface, imports, tests).
+- `/docs/CLAUDE.md` — documentation layout and writing rules.
+- `/docs/devlog/CLAUDE.md` — devlog convention (one file per UTC day).
+- `/.github/CLAUDE.md` — CI pipeline and workflow rules.
 
-## Design rules
+## Canonical references
 
-API shape (context, errors, struct-vs-interface, `Ingest` typing) and the
-test-gating policy are documented in `docs/design-rules.md`. Apply those
-rules to all new and refactored code.
+- `/docs/design-rules.md` — full API design rules with rationale.
+- `/docs/devlog/YYYY-MM-DD.md` — chronological journal.
+- `/README.md` — user-facing setup / build / test.
+
+## Outstanding manual tasks
+
+None at the moment. CI's `Format check` (`gofmt -l .`) is live in
+`.github/workflows/ci.yml`; the prior "needs workflow OAuth scope" warning
+no longer applies.
