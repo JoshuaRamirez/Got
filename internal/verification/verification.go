@@ -5,7 +5,9 @@
 // is only issued when all policy obligations are discharged.
 //
 // Categorically, for a fixed environment E, evaluation is a functor:
-//   Eval_E : Front_Pi -> Res
+//
+//	Eval_E : Front_Pi -> Res
+//
 // Certificates are objects in a fiber over a frontier, ordered by evidential
 // strength.
 //

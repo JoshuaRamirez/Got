@@ -5,8 +5,9 @@
 // subcategory. When no admissible pushout exists, typed conflicts are returned.
 //
 // Categorically, merge is a Kleisli morphism over the conflict monad:
-//   T(X) = X + Conf_Pi
-//   Merge_Pi : Front_Pi x Front_Pi -> Kl(T)
+//
+//	T(X) = X + Conf_Pi
+//	Merge_Pi : Front_Pi x Front_Pi -> Kl(T)
 //
 // The XOR invariant — either merged or conflicted, never both — follows
 // structurally from the monad.

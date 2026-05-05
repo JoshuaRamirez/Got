@@ -4,6 +4,7 @@
 // freshness relative to a reference time.
 //
 // Imports: internal/graph, internal/identity.
+// Must not import: revision or any higher orchestration package.
 package temporal
 
 import (

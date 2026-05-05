@@ -2,10 +2,14 @@
 //
 // It is the single orchestration layer that composes all root modules. A
 // repository object R = (G, N, Pi, Gamma) bundles the immutable graph with
-// the mutable namespace shell.
+// the mutable namespace shell. It exposes a Service (not an Engine) because
+// it orchestrates all subsystem Engines rather than implementing a single
+// domain operation.
 //
 // Categorically:
-//   Repo_Sigma ~= integral_{G in Valid_Sigma} State(G)
+//
+//	Repo_Sigma ~= integral_{G in Valid_Sigma} State(G)
+//
 // where the fiber State(G) contains namespace bindings, active projections,
 // release aliases, and activation state.
 //

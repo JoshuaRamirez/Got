@@ -3,7 +3,12 @@
 // A release binds a namespace alias to a certified frontier under governance
 // constraints. Rollback reverts to a previously named state.
 //
+// Note: this package exposes a Service (not an Engine) because it orchestrates
+// multiple subsystems (governance, verification, namespace) rather than
+// implementing a single domain operation.
+//
 // Imports: internal/governance, internal/verification, internal/namespace, internal/projection.
+// Must not import: composition, realization, or repo.
 package release
 
 import (

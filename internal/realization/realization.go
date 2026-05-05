@@ -5,9 +5,13 @@
 // provenance witness linking it back to the projected subgraph.
 //
 // Categorically, for each target t, materialization is a lax functor:
-//   Mat_t : Repo_Sigma -> Bund_t
+//
+//	Mat_t : Repo_Sigma -> Bund_t
+//
 // with a provenance witness map:
-//   pi_B : Paths(B) -> Sub(U(R))
+//
+//	pi_B : Paths(B) -> Sub(U(R))
+//
 // landing inside the projected subgraph.
 //
 // Imports: internal/projection, internal/graph, internal/identity.

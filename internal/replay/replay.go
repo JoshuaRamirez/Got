@@ -6,6 +6,7 @@
 // produces a deterministic outcome.
 //
 // Imports: internal/revision, internal/verification, internal/graph.
+// Must not import: composition, realization, or repo.
 package replay
 
 import (
