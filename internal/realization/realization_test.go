@@ -140,6 +140,27 @@ func TestRegisterCustomMaterializer(t *testing.T) {
 	}
 }
 
+// JSON manifest: one path covering every vertex as provenance.
+func TestJSONManifestMaterialize(t *testing.T) {
+	ctx := context.Background()
+	a := vid("a")
+	b := vid("b")
+	v := viewOver(t, a, b)
+
+	e := realization.NewEngine()
+	bundle, err := e.Materialize(ctx, v, realization.JSONManifestTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.Paths()) != 1 || bundle.Paths()[0] != "manifest.json" {
+		t.Fatalf("expected exactly [manifest.json], got %v", bundle.Paths())
+	}
+	prov := bundle.Provenance("manifest.json")
+	if len(prov) != 2 {
+		t.Fatalf("expected manifest provenance to cover both vertices, got %d", len(prov))
+	}
+}
+
 // Failure: ctx cancelled.
 func TestMaterializeContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

@@ -236,6 +236,40 @@ func TestApplyContextCancelled(t *testing.T) {
 	}
 }
 
+// Failure path UC-S02 4a: inserting an edge whose type is not admissible
+// for the endpoint vertex types fails graph.Validate after the rewrite.
+func TestApplyInsertViolatesSchema(t *testing.T) {
+	ctx := context.Background()
+	agent := vid("agent")
+	other := vid("other-agent")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: agent, Type: ontology.Agent})
+	g, _ = g.WithVertex(graph.Vertex{ID: other, Type: ontology.Agent})
+
+	// Right-hand side wants to add an AuthoredBy edge from Agent to Agent
+	// — not admissible (AuthoredBy requires Agent -> Artifact).
+	verts := []graph.Vertex{
+		{ID: agent, Type: ontology.Agent},
+		{ID: other, Type: ontology.Agent},
+	}
+	leftSub := &inlineSubgraph{ids: []identity.VertexID{agent, other}, verts: verts}
+	ctxSub := &inlineSubgraph{ids: []identity.VertexID{agent, other}, verts: verts}
+	badEdge := graph.Edge{ID: eid("bad"), Type: ontology.AuthoredBy, From: agent, To: other}
+	rightSub := &inlineSubgraph{
+		ids:   []identity.VertexID{agent, other},
+		verts: verts,
+		edges: []graph.Edge{badEdge},
+	}
+	rule := testRule{left: leftSub, ctx: ctxSub, right: rightSub}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{agent: agent, other: other}}
+
+	e := revision.NewEngine()
+	_, _, err := e.Apply(ctx, g, rule, match)
+	if !errors.Is(err, graph.ErrNotWellFormed) {
+		t.Fatalf("expected graph.ErrNotWellFormed for schema-violating insertion, got %v", err)
+	}
+}
+
 // Replayable: all vertices present → nil.
 func TestReplayableHappyPath(t *testing.T) {
 	ctx := context.Background()

@@ -51,6 +51,26 @@ func BenchmarkWithVertex_1000(b *testing.B) {
 	}
 }
 
+// Same workload via Builder: O(n) instead of O(n²).
+func BenchmarkBuilder_1000(b *testing.B) {
+	schema := ontology.NewDefaultSchema()
+	verts := make([]graph.Vertex, 1000)
+	for i := range verts {
+		verts[i] = graph.Vertex{
+			ID:   identity.VertexID(sha256.Sum256([]byte("v-" + strconv.Itoa(i)))),
+			Type: ontology.Artifact,
+		}
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		bld := graph.NewBuilder(schema)
+		for _, v := range verts {
+			bld.AddVertex(v)
+		}
+		_ = bld.Build()
+	}
+}
+
 func BenchmarkValidate_1000(b *testing.B) {
 	g, _ := buildGraph(1000)
 	b.ResetTimer()
