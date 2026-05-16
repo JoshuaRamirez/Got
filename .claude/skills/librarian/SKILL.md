@@ -18,7 +18,8 @@ Parse the user's input as `<subcommand> [args...]`. Default: `list`.
 | `docs/requirements/` | Primary requirements (currently use cases) | `/requirements` | `docs/requirements/CLAUDE.md` |
 | `docs/requirements/use-cases/` | Cockburn use case catalogue | `/use-case` | `docs/requirements/use-cases/CLAUDE.md` |
 | `docs/devlog/` | Chronological session journal | `/devlog` | `docs/devlog/CLAUDE.md` |
-| `docs/` (root file) | API design rules | — (read `docs/design-rules.md`) | `docs/CLAUDE.md` |
+| `docs/` (root files) | Architecture, API design rules | — (read `docs/architecture.md`, `docs/design-rules.md`) | `docs/CLAUDE.md` |
+| repo root | Release-style changelog | — (read `CHANGELOG.md`) | `CLAUDE.md` |
 
 ## Subcommands
 
@@ -36,6 +37,9 @@ these heuristics:
 - "requirement", "use case", "UC", "user goal", "system function" →
   `/use-case` for the catalogue, `/requirements` for the broader format
   index.
+- "architecture", "overview", "how does X fit", "layers", "dependency
+  graph" → `docs/architecture.md`.
+- "what changed", "release notes", "history" → `CHANGELOG.md`.
 - "design rule", "API rule", "ctx", "errors", "struct vs interface",
   "Payload" → `docs/design-rules.md`.
 - "decision", "session log", "what changed today" → `/devlog`.
