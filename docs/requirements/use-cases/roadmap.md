@@ -78,23 +78,16 @@ governance → verification → composition → repo`. Five packages.
 
 **Cumulative**: 11 / 37 Verified.
 
-### Phase 1A — Parallel-safe leaves
+### Phase 1A — Done
 
-Each package depends only on `graph` + `identity`. All four can be
-implemented concurrently by separate workstreams. Pick any one.
-
-| Package | UCs unlocked when impl + tests land |
+| Package | UCs Verified |
 |---|---|
 | `multiagent` | UC-U12 |
 | `temporal` | UC-U13, UC-S20 |
 | `projection` | UC-S10, UC-S11 |
 | `revision` | UC-S02, UC-S19 |
 
-**Cumulative if all complete**: 18 / 37 Verified (+7).
-
-`projection` is on the critical path to `repo`. `revision` is required
-by `replay`. `multiagent` and `temporal` are independently completable
-end-to-end.
+**Cumulative**: 18 / 37 Verified (+7 from Phase 0).
 
 ### Phase 1B — Depends on `projection`
 
@@ -157,19 +150,17 @@ All four can be implemented in parallel.
 
 ## Current focus
 
-**Active phase: Phase 1A.** Phase 0 is complete. Pick any of the four
-parallel-safe leaves below; none blocks the others.
+**Active phase: Phase 1B.** Phase 1A is complete (`projection`,
+`revision`, `temporal`, `multiagent` all Verified). Two parallel-safe
+packages remain in Phase 1B:
 
-Recommended order if working alone:
+1. **`governance`** — critical path; unlocks `verification`,
+   `composition`, `release`, `capability`. UCs: UC-S12, UC-S13.
+2. **`realization`** — off the critical path but needed by `repo`. UCs:
+   UC-S14.
 
-1. **`projection`** — critical path; unlocks `governance`, `realization`,
-   `verification`, `composition`, `release`, `capability`. UCs: UC-S10,
-   UC-S11.
-2. **`revision`** — needed by `replay` and `repo`. UCs: UC-S02, UC-S19.
-3. **`temporal`** — independently completable. UCs: UC-U13, UC-S20.
-4. **`multiagent`** — independently completable. UCs: UC-U12.
-
-If working in parallel: claim a row, update the ledger when impl + tests
+Both depend on `projection` (already Verified) and have no dependency on
+each other. Claim either row and update the ledger when impl + tests
 land in the same commit.
 
 ## Update protocol
