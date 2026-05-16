@@ -70,3 +70,22 @@ func CertifiedNonEmpty(label string) Predicate {
 		return false, Witness{}
 	})
 }
+
+// AllPoliciesNamed is a predicate that fires when the supplied policy
+// set contains at least one policy with each of the named names. Useful
+// for "this configuration includes the security review" assertions.
+// The witness is named by the supplied label.
+func AllPoliciesNamed(label string, requiredNames ...string) Predicate {
+	return PredicateFunc(func(_ graph.Graph, _ projection.Frontier, ps []governance.Policy, _ []verification.Certificate) (bool, Witness) {
+		seen := make(map[string]bool, len(ps))
+		for _, p := range ps {
+			seen[p.Name()] = true
+		}
+		for _, name := range requiredNames {
+			if !seen[name] {
+				return false, Witness{}
+			}
+		}
+		return true, Witness{Name: label}
+	})
+}

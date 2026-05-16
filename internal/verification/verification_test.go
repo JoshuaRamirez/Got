@@ -270,6 +270,71 @@ func TestScalarResultCompare(t *testing.T) {
 	}
 }
 
+// WeightedAverageEvaluator combines child evaluators by weighted mean.
+func TestWeightedAverageEvaluator(t *testing.T) {
+	ctx := context.Background()
+	g, f := emptyFrontier(t)
+
+	score := func(s float64) verification.Evaluator {
+		return verification.EvaluatorFunc(func(graph.Graph, projection.Frontier, verification.EnvironmentBinding) (verification.ResultValue, error) {
+			return verification.ScalarResult(s), nil
+		})
+	}
+	w := verification.WeightedAverageEvaluator{
+		Children: []verification.WeightedChild{
+			{Weight: 1, Evaluator: score(0.8)},
+			{Weight: 3, Evaluator: score(0.4)},
+		},
+	}
+	got, err := w.Evaluate(g, f, verification.EnvironmentBinding{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := verification.ScalarResult((0.8*1 + 0.4*3) / 4)
+	if s, _ := got.(verification.ScalarResult); s != want {
+		t.Fatalf("weighted average = %v, want %v", s, want)
+	}
+
+	// Usable as the evaluator inside an Engine.
+	e := verification.NewEngine(governance.NewEngine(), w)
+	eval, err := e.Evaluate(ctx, g, f, verification.EnvironmentBinding{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := eval.Result().(verification.ScalarResult); s != want {
+		t.Fatalf("engine result = %v, want %v", s, want)
+	}
+}
+
+// Certify failure path UC-S06 2b: aggregate Unknown blocks certification.
+func TestCertifyUnknownBlocks(t *testing.T) {
+	ctx := context.Background()
+	g, f := emptyFrontier(t)
+
+	gov := governance.NewEngine()
+	e := verification.NewEngine(gov, nil)
+
+	_, err := e.Certify(ctx, g, f, nil, []governance.Policy{fixedPolicy{
+		d: governance.Unknown,
+	}})
+	if !errors.Is(err, verification.ErrCertificationFailed) {
+		t.Fatalf("expected ErrCertificationFailed for Unknown decision, got %v", err)
+	}
+}
+
+// WeightedAverageEvaluator with zero total weight returns ScalarResult(0).
+func TestWeightedAverageZeroWeight(t *testing.T) {
+	g, f := emptyFrontier(t)
+	w := verification.WeightedAverageEvaluator{}
+	got, err := w.Evaluate(g, f, verification.EnvironmentBinding{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.(verification.ScalarResult) != 0 {
+		t.Fatalf("zero-weight average = %v, want 0", got)
+	}
+}
+
 // Failure: ctx cancelled.
 func TestEvaluateContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

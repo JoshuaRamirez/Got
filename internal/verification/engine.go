@@ -138,6 +138,42 @@ func (c *certificate) Policies() []string          { return c.policies }
 
 // --- ResultValue helpers ---
 
+// WeightedAverageEvaluator composes child evaluators and returns the
+// weighted average of their ScalarResult outputs. Non-scalar child
+// results are skipped. Zero total weight returns ScalarResult(0).
+type WeightedAverageEvaluator struct {
+	Children []WeightedChild
+}
+
+// WeightedChild pairs a child Evaluator with its weight.
+type WeightedChild struct {
+	Weight    float64
+	Evaluator Evaluator
+}
+
+// Evaluate runs each child, sums (weight * scalarResult), divides by the
+// sum of weights for the children that returned ScalarResults. Errors
+// from any child abort the call.
+func (w WeightedAverageEvaluator) Evaluate(g graph.Graph, f projection.Frontier, env EnvironmentBinding) (ResultValue, error) {
+	var sum, totalWeight float64
+	for _, c := range w.Children {
+		rv, err := c.Evaluator.Evaluate(g, f, env)
+		if err != nil {
+			return nil, err
+		}
+		s, ok := rv.(ScalarResult)
+		if !ok {
+			continue
+		}
+		sum += float64(s) * c.Weight
+		totalWeight += c.Weight
+	}
+	if totalWeight == 0 {
+		return ScalarResult(0), nil
+	}
+	return ScalarResult(sum / totalWeight), nil
+}
+
 // ScalarResult is a numeric ResultValue ordered by ordinary comparison
 // when compared to another ScalarResult. Comparison against any other
 // ResultValue type returns 0 (incomparable).

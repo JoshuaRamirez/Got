@@ -58,6 +58,13 @@ func nonEmptyFrontier(t *testing.T) (graph.Graph, projection.Frontier) {
 	return g, f
 }
 
+type fixedPolicyName string
+
+func (n fixedPolicyName) Name() string { return string(n) }
+func (fixedPolicyName) Check(graph.Graph, projection.Frontier) (governance.Decision, []governance.Obligation, error) {
+	return governance.Sat, nil, nil
+}
+
 type stubCertificate struct{}
 
 func (stubCertificate) Target() projection.Frontier         { return nil }
@@ -152,6 +159,35 @@ func TestEmergesRegister(t *testing.T) {
 	}
 	if !ok || w.Name != "late-bound" {
 		t.Fatalf("expected emergence with name late-bound, got (%v, %q)", ok, w.Name)
+	}
+}
+
+// AllPoliciesNamed: fires when all required names are present.
+func TestAllPoliciesNamedFires(t *testing.T) {
+	ctx := context.Background()
+	g, f := nonEmptyFrontier(t)
+
+	p1 := fixedPolicyName("security-review")
+	p2 := fixedPolicyName("code-review")
+	e := capability.NewEngine(capability.AllPoliciesNamed("ready", "security-review", "code-review"))
+	ok, w, err := e.Emerges(ctx, g, f, []governance.Policy{p1, p2}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || w.Name != "ready" {
+		t.Fatalf("expected emergence with name ready, got (%v, %q)", ok, w.Name)
+	}
+}
+
+// AllPoliciesNamed: does not fire when a required name is missing.
+func TestAllPoliciesNamedMissingName(t *testing.T) {
+	ctx := context.Background()
+	g, f := nonEmptyFrontier(t)
+
+	e := capability.NewEngine(capability.AllPoliciesNamed("ready", "security-review", "code-review"))
+	_, _, err := e.Emerges(ctx, g, f, []governance.Policy{fixedPolicyName("security-review")}, nil)
+	if !errors.Is(err, capability.ErrNoEmergence) {
+		t.Fatalf("expected ErrNoEmergence when a required name is missing, got %v", err)
 	}
 }
 

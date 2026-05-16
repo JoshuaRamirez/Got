@@ -26,6 +26,11 @@ func (f MaterializerFunc) Materialize(s graph.Subgraph) (Bundle, error) { return
 // as provenance" target. NewEngine registers a materializer for it.
 const ManifestTarget Target = "manifest"
 
+// JSONManifestTarget emits a single path "manifest.json" whose
+// provenance lists every vertex in the view. Useful when the consumer
+// wants a single bundle entry whose provenance covers everything.
+const JSONManifestTarget Target = "manifest.json"
+
 // DefaultEngine is the default Engine implementation: a Target →
 // Materializer registry. Targets without a registered materializer fail
 // with ErrTargetUnsupported. Use NewEngine to construct one preloaded
@@ -34,10 +39,12 @@ type DefaultEngine struct {
 	registry map[Target]Materializer
 }
 
-// NewEngine returns a DefaultEngine preloaded with ManifestTarget.
+// NewEngine returns a DefaultEngine preloaded with ManifestTarget and
+// JSONManifestTarget.
 func NewEngine() *DefaultEngine {
 	e := &DefaultEngine{registry: make(map[Target]Materializer)}
 	e.Register(ManifestTarget, MaterializerFunc(manifestMaterialize))
+	e.Register(JSONManifestTarget, MaterializerFunc(jsonManifestMaterialize))
 	return e
 }
 
@@ -58,6 +65,20 @@ func (e *DefaultEngine) Materialize(ctx context.Context, v projection.View, t Ta
 		return nil, fmt.Errorf("%w: %q", ErrTargetUnsupported, t)
 	}
 	return m.Materialize(v.Subgraph())
+}
+
+// jsonManifestMaterialize emits a single path "manifest.json" whose
+// provenance covers every vertex in the view.
+func jsonManifestMaterialize(sub graph.Subgraph) (Bundle, error) {
+	prov := map[string][]identity.VertexID{
+		"manifest.json": append([]identity.VertexID(nil), sub.VertexIDs()...),
+	}
+	return &mapBundle{
+		target:   JSONManifestTarget,
+		paths:    []string{"manifest.json"},
+		prov:     prov,
+		fidelity: FidelityContract{Name: "single-manifest"},
+	}, nil
 }
 
 // manifestMaterialize is the Materializer registered for ManifestTarget.
