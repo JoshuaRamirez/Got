@@ -109,21 +109,19 @@ governance → verification → composition → repo`. Five packages.
 UC-U05, UC-U04, UC-U06, UC-U17 are still `Specified` — they route
 through `repo.Service` which lands in Phase 4.
 
-### Phase 3 — Depends on `verification`
+### Phase 3 — Done
 
-All four can be implemented in parallel.
+| Package | UCs Verified |
+|---|---|
+| `replay` | UC-U14 |
+| `capability` | UC-U16 |
+| `composition` | UC-S03, UC-S04 |
+| `release` | UC-U07, UC-U08 |
 
-| Package | Deps in this layer | UCs unlocked |
-|---|---|---|
-| `replay` | `verification`, `revision` | UC-U14 |
-| `capability` | `verification`, `governance`, `projection` | UC-U16 |
-| `composition` | `verification`, `governance`, `projection` | UC-S03, UC-S04 |
-| `release` | `verification`, `governance`, `namespace`, `projection` | UC-U07, UC-U08 |
+**Cumulative**: 30 / 37 Verified (+6 from Phase 2). All system-level UCs
+are Verified at this point.
 
-**Cumulative**: 30 / 37 Verified (+6).
-
-`composition` is on the critical path to `repo`. UC-U04 and UC-U17 stay
-`Specified` until `repo` lands.
+UC-U04 and UC-U17 stay `Specified` until Phase 4 lands `repo`.
 
 ### Phase 4 — Top of stack
 
@@ -146,16 +144,16 @@ All four can be implemented in parallel.
 
 ## Current focus
 
-**Active phase: Phase 3.** Phases 0–2 are all complete. Four
-parallel-safe packages remain in Phase 3, all dependent only on
-`verification` (and the lower-layer packages that are already Verified):
+**Active phase: Phase 4.** Phases 0–3 are all complete. All system-level
+UCs are Verified. The single package remaining is the `repo` facade,
+which lands the seven user-level UCs routed through `repo.Service`:
 
-1. **`composition`** — critical path to `repo`. UCs: UC-S03, UC-S04.
-2. **`replay`** — UC-U14.
-3. **`capability`** — UC-U16.
-4. **`release`** — UC-U07, UC-U08.
+1. **`repo`** — UC-U01 (Ingest), UC-U02 (Revise), UC-U03 full (Branch),
+   UC-U04 (Merge), UC-U05 (Evaluate), UC-U06 (Materialize), UC-U17
+   (Resolve conflicts).
 
-None depends on the others within this phase. Claim any row.
+All dependencies are Verified. Implementing `repo` completes the
+roadmap.
 
 ## Update protocol
 

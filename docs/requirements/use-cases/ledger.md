@@ -42,16 +42,16 @@ When a UC is retired:
 | [UC-U04](user/UC-U04-merge-frontiers.md) | Merge two frontiers | Specified | `internal/repo` (interface) | — | 2026-05-05 | Awaits `repo.Service` and `composition.Engine` impls. |
 | [UC-U05](user/UC-U05-evaluate-frontier.md) | Evaluate a frontier in an environment | Specified | `internal/repo` (interface) | — | 2026-05-05 | Awaits `repo.Service` and `verification.Engine` impls. |
 | [UC-U06](user/UC-U06-materialize-bundle.md) | Materialize a bundle from a projection | Specified | `internal/repo` (interface) | — | 2026-05-05 | Awaits `repo`, `projection`, `realization` impls. |
-| [UC-U07](user/UC-U07-promote-release.md) | Promote a frontier to a release alias | Specified | `internal/release` (interface) | — | 2026-05-05 | Awaits `release.Service` and `governance.Engine` impls. |
-| [UC-U08](user/UC-U08-rollback-release.md) | Rollback a release alias | Specified | `internal/release` (interface) | — | 2026-05-05 | Awaits `release.Service` impl + release ledger storage. |
+| [UC-U07](user/UC-U07-promote-release.md) | Promote a frontier to a release alias | Verified | `internal/release/service.go` (`Promote`) | `internal/release/release_test.go` | 2026-05-05 | Happy path + empty-frontier, nil-certificate, target-mismatch failure paths covered. Trusts the supplied certificate's gate decision. |
+| [UC-U08](user/UC-U08-rollback-release.md) | Rollback a release alias | Verified | `internal/release/service.go` (`Rollback`) | `internal/release/release_test.go` | 2026-05-05 | Two-version Promote/Rollback cycle and ErrUnknownVersion failure path covered. In-memory ledger keyed by (alias, version). |
 | [UC-U09](user/UC-U09-resolve-name.md) | Resolve a name to a vertex | Verified | `internal/namespace/mem.go` | `internal/namespace/namespace_test.go` | 2026-05-05 | Main path + unbound-name failure path covered. |
 | [UC-U10](user/UC-U10-query-graph.md) | Query the graph | Verified | `internal/graph/mem.go` | `internal/graph/graph_test.go` | 2026-05-05 | `Vertex`/`Edge`/`Hyperedge`/`VertexIDs`/`Induce` covered; `Query` returns `ErrQueryUnsupported` (covered). |
 | [UC-U11](user/UC-U11-trace-provenance.md) | Trace causal provenance | Verified | `internal/provenance/engine.go` | `internal/provenance/provenance_test.go` | 2026-05-05 | All four read methods covered including reflexivity, monotonicity, idempotence axioms. |
 | [UC-U12](user/UC-U12-trace-authorship.md) | Trace authorship and responsibility | Verified | `internal/multiagent/engine.go` | `internal/multiagent/multiagent_test.go` | 2026-05-05 | Authorship and ResponsibilityTrace covered; ErrNoAuthorship and graph.ErrVertexNotFound failure paths exercised. |
 | [UC-U13](user/UC-U13-check-freshness.md) | Check temporal freshness of a vertex | Verified | `internal/temporal/engine.go` | `internal/temporal/temporal_test.go` | 2026-05-05 | Validity, Fresh half-open semantics, indefinite-`ValidTo`, malformed triple, and unknown-vertex paths covered. |
-| [UC-U14](user/UC-U14-replay-capsule.md) | Replay a change capsule | Specified | `internal/replay` (interface) | — | 2026-05-05 | Awaits `replay.Engine` and `revision.Engine` impls. |
+| [UC-U14](user/UC-U14-replay-capsule.md) | Replay a change capsule | Verified | `internal/replay/engine.go` (`Replay`) | `internal/replay/replay_test.go` | 2026-05-05 | Delegates to revision.Replayable. Happy path, empty-environment "any" treatment, env-mismatch and consumed-missing failure paths covered. |
 | [UC-U15](user/UC-U15-prove-claim.md) | Prove a claim with a proof | Verified | `internal/verification/engine.go` (`Prove`) | `internal/verification/verification_test.go` | 2026-05-05 | Proves edge → true, no-edge → false, vertex-not-found failure path covered. |
-| [UC-U16](user/UC-U16-detect-emergent-capability.md) | Detect an emergent capability | Specified | `internal/capability` (interface) | — | 2026-05-05 | Awaits `capability.Engine` impl. |
+| [UC-U16](user/UC-U16-detect-emergent-capability.md) | Detect an emergent capability | Verified | `internal/capability/engine.go` (`Emerges`) | `internal/capability/capability_test.go` | 2026-05-05 | Predicate-list dispatch; first-match wins; built-in `CertifiedNonEmpty` predicate; ErrNoEmergence failure path covered. |
 | [UC-U17](user/UC-U17-resolve-merge-conflicts.md) | Resolve merge conflicts | Specified | `internal/composition` (interface) | — | 2026-05-05 | Awaits `composition.Engine.Resolve` impl. |
 
 ## System use cases
@@ -60,8 +60,8 @@ When a UC is retired:
 |---|---|---|---|---|---|---|
 | [UC-S01](system/UC-S01-validate-graph.md) | Validate graph well-formedness | Verified | `internal/graph/mem.go` (`Validate`) | `internal/graph/graph_test.go` | 2026-05-05 | All four `ErrNotWellFormed` failure modes exercised. |
 | [UC-S02](system/UC-S02-apply-dpo-rewrite.md) | Apply a DPO rewrite | Verified | `internal/revision/engine.go` (`Apply`) | `internal/revision/revision_test.go` | 2026-05-05 | Add-vertex, add-edge, delete-vertex paths; ErrNoMatch and ErrSideConditionFailed failure paths exercised. |
-| [UC-S03](system/UC-S03-compute-pushout.md) | Compute the guarded pushout of two frontiers | Specified | `internal/composition` (interface) | — | 2026-05-05 | Awaits `composition.Engine.Merge` impl. |
-| [UC-S04](system/UC-S04-resolve-conflicts.md) | Apply conflict resolutions | Specified | `internal/composition` (interface) | — | 2026-05-05 | Awaits `composition.Engine.Resolve` impl. |
+| [UC-S03](system/UC-S03-compute-pushout.md) | Compute the guarded pushout of two frontiers | Verified | `internal/composition/engine.go` (`Merge`) | `internal/composition/composition_test.go` | 2026-05-05 | Union frontier with governance gate; Sat → Certificate via verification.Certify; Unsat → Policy-kind Conflict. Identical-frontiers and empty-policy paths covered. |
+| [UC-S04](system/UC-S04-resolve-conflicts.md) | Apply conflict resolutions | Verified | `internal/composition/engine.go` (`Resolve`) | `internal/composition/composition_test.go` | 2026-05-05 | Sequential resolution application + re-merge; no-op resolution and ErrConflictUnresolvable failure path covered. |
 | [UC-S05](system/UC-S05-evaluate-in-environment.md) | Evaluate a frontier in a given environment | Verified | `internal/verification/engine.go` (`Evaluate`) | `internal/verification/verification_test.go` | 2026-05-05 | Dispatches to registered Evaluator; main path, no-evaluator and evaluator-error failure paths, ctx cancel covered. |
 | [UC-S06](system/UC-S06-issue-certificate.md) | Issue a certificate for a frontier | Verified | `internal/verification/engine.go` (`Certify`) | `internal/verification/verification_test.go` | 2026-05-05 | Delegates to governance.GateRelease; happy path, Unsat failure, outstanding-obligations failure, empty-policy trivial path covered. |
 | [UC-S07](system/UC-S07-compute-provenance-closure.md) | Compute the provenance closure of a seed set | Verified | `internal/provenance/engine.go` (`Close`) | `internal/provenance/provenance_test.go` | 2026-05-05 | Extensivity, monotonicity, idempotence axioms tested. |
@@ -85,21 +85,21 @@ As of 2026-05-05:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 10 | 1 | 0 | 6 | 0 | 17 |
-| System | 2 | 0 | 0 | 18 | 0 | 20 |
-| **Total** | **12** | **1** | **0** | **24** | **0** | **37** |
+| User | 6 | 1 | 0 | 10 | 0 | 17 |
+| System | 0 | 0 | 0 | 20 | 0 | 20 |
+| **Total** | **6** | **1** | **0** | **30** | **0** | **37** |
 
-Verified coverage: 24 / 37 ≈ 65%. Phases 0–2 complete (see `roadmap.md`).
-Active phase advances to Phase 3 (`replay`, `capability`, `composition`,
-`release`) — four parallel-safe packages all dependent on `verification`.
+Verified coverage: 30 / 37 ≈ 81%. Phases 0–3 complete (see `roadmap.md`).
+**All system-level UCs are Verified.** The only remaining work is the
+`repo` facade, which unlocks the seven UCs (UC-U01..UC-U06 and UC-U17)
+routed through `repo.Service`.
 
 ## Next-bite candidates
 
-Per `roadmap.md`, the active phase is now **Phase 3**:
+Per `roadmap.md`, the active phase is now **Phase 4**:
 
-1. **`composition`** — critical path; unlocks `repo`. UCs: UC-S03, UC-S04.
-2. **`replay`** — UC-U14.
-3. **`capability`** — UC-U16.
-4. **`release`** — UC-U07, UC-U08.
+1. **`repo`** — top of stack. UCs: UC-U01 (Ingest), UC-U02 (Revise),
+   UC-U03 full (Branch), UC-U04 (Merge), UC-U05 (Evaluate), UC-U06
+   (Materialize), UC-U17 (Resolve conflicts).
 
-All four are independent of one another within Phase 3.
+All `repo` dependencies are Verified.
