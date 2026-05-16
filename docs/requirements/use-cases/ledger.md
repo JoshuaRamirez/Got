@@ -69,9 +69,9 @@ When a UC is retired:
 | [UC-S09](system/UC-S09-enumerate-causal-traces.md) | Enumerate causal traces between two vertices | Verified | `internal/provenance/engine.go` (`TraceSet`) | `internal/provenance/provenance_test.go` | 2026-05-05 | Simple-path enumeration verified. |
 | [UC-S10](system/UC-S10-select-frontier.md) | Select a frontier from the graph | Verified | `internal/projection/engine.go` (`Select`, `IDsSelector`) | `internal/projection/projection_test.go` | 2026-05-05 | Main path, empty selector, ErrInvalidSelector failure paths, ctx cancellation covered. |
 | [UC-S11](system/UC-S11-apply-projection-spec.md) | Apply a full projection spec | Verified | `internal/projection/engine.go` (`Project`, `InduceSpec`) | `internal/projection/projection_test.go` | 2026-05-05 | Main path + spec-error failure path covered. |
-| [UC-S12](system/UC-S12-check-policy-aggregate.md) | Check the aggregate decision over a policy set | Specified | `internal/governance` (interface) | — | 2026-05-05 | Awaits `governance.Engine.Check` impl. |
-| [UC-S13](system/UC-S13-gate-release.md) | Gate a frontier for release | Specified | `internal/governance` (interface) | — | 2026-05-05 | Awaits `governance.Engine.GateRelease` impl. |
-| [UC-S14](system/UC-S14-materialize-for-target.md) | Materialize a view for a specific target | Specified | `internal/realization` (interface) | — | 2026-05-05 | Awaits `realization.Engine.Materialize` impl. |
+| [UC-S12](system/UC-S12-check-policy-aggregate.md) | Check the aggregate decision over a policy set | Verified | `internal/governance/engine.go` (`Check`) | `internal/governance/governance_test.go` | 2026-05-05 | Aggregate rule (Unsat dominates, then Unknown), empty policy set, obligation concatenation, policy-error wrap, ctx cancel covered. |
+| [UC-S13](system/UC-S13-gate-release.md) | Gate a frontier for release | Verified | `internal/governance/engine.go` (`GateRelease`) | `internal/governance/governance_test.go` | 2026-05-05 | Sat + no obligations → true, outstanding obligations block, Unsat blocks, empty policies → trivially true. |
+| [UC-S14](system/UC-S14-materialize-for-target.md) | Materialize a view for a specific target | Verified | `internal/realization/engine.go` (`DefaultEngine`, `ManifestTarget`) | `internal/realization/realization_test.go` | 2026-05-05 | Manifest materializer, custom registration, empty view, unsupported-target failure path, ctx cancel covered. |
 | [UC-S15](system/UC-S15-bind-name.md) | Bind a name to a vertex | Verified | `internal/namespace/mem.go` (`BindRef`/`BindAlias`/`BindProjection`) | `internal/namespace/namespace_test.go` | 2026-05-05 | All three name kinds exercised; rebind-overwrite path covered. |
 | [UC-S16](system/UC-S16-resolve-binding.md) | Resolve a name binding | Verified | `internal/namespace/mem.go` (`Resolve*`) | `internal/namespace/namespace_test.go` | 2026-05-05 | Bound + unbound paths covered. |
 | [UC-S17](system/UC-S17-compute-content-id.md) | Compute a content-addressed identifier | Verified | `internal/identity/sha256.go` | `internal/identity/identity_test.go` | 2026-05-05 | SHA-256-backed factory; canonical-bytes contract covered. |
@@ -86,22 +86,21 @@ As of 2026-05-05:
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
 | User | 11 | 1 | 0 | 5 | 0 | 17 |
-| System | 7 | 0 | 0 | 13 | 0 | 20 |
-| **Total** | **18** | **1** | **0** | **18** | **0** | **37** |
+| System | 4 | 0 | 0 | 16 | 0 | 20 |
+| **Total** | **15** | **1** | **0** | **21** | **0** | **37** |
 
-Verified coverage: 18 / 37 ≈ 49%. Phase 1A complete (see `roadmap.md`):
-`projection`, `revision`, `temporal`, `multiagent` are all implemented
-and tested. Active phase advances to Phase 1B (`governance`,
-`realization`).
+Verified coverage: 21 / 37 ≈ 57%. Phase 1A and Phase 1B both complete
+(see `roadmap.md`): `projection`, `revision`, `temporal`, `multiagent`,
+`governance`, `realization` are all implemented and tested. Active phase
+advances to Phase 2 (`verification`).
 
 ## Next-bite candidates
 
-Per `roadmap.md`, the active phase is now **Phase 1B**:
+Per `roadmap.md`, the active phase is now **Phase 2**:
 
-1. **`governance.Engine`** — verifies UC-S12 and UC-S13. On the critical
-   path to `verification` → `composition` → `repo`.
-2. **`realization.Engine`** — verifies UC-S14. Needed by `repo` but off
-   the critical path.
+1. **`verification.Engine`** — verifies UC-S05, UC-S06, UC-U15. On the
+   critical path. Unlocks Phase 3 (`composition`, `capability`, `replay`,
+   `release`) which in turn unlocks Phase 4 (`repo`).
 
-Both depend on `projection` (Verified in Phase 1A) and can be implemented
-in parallel.
+All `verification` dependencies (`graph`, `projection`, `governance`,
+`identity`) are Verified.

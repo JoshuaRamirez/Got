@@ -89,16 +89,14 @@ governance → verification → composition → repo`. Five packages.
 
 **Cumulative**: 18 / 37 Verified (+7 from Phase 0).
 
-### Phase 1B — Depends on `projection`
+### Phase 1B — Done
 
-| Package | Deps in this layer | UCs unlocked |
-|---|---|---|
-| `governance` | `projection` | UC-S12, UC-S13 |
-| `realization` | `projection` | UC-S14 |
+| Package | UCs Verified |
+|---|---|
+| `governance` | UC-S12, UC-S13 |
+| `realization` | UC-S14 |
 
-**Cumulative**: 21 / 37 Verified (+3).
-
-`governance` is on the critical path. `realization` is required by `repo`.
+**Cumulative**: 21 / 37 Verified (+3 from Phase 1A).
 
 ### Phase 2 — Depends on `governance`
 
@@ -150,18 +148,16 @@ All four can be implemented in parallel.
 
 ## Current focus
 
-**Active phase: Phase 1B.** Phase 1A is complete (`projection`,
-`revision`, `temporal`, `multiagent` all Verified). Two parallel-safe
-packages remain in Phase 1B:
+**Active phase: Phase 2.** Phases 0, 1A, and 1B are all complete. One
+package remains in Phase 2:
 
-1. **`governance`** — critical path; unlocks `verification`,
-   `composition`, `release`, `capability`. UCs: UC-S12, UC-S13.
-2. **`realization`** — off the critical path but needed by `repo`. UCs:
-   UC-S14.
+1. **`verification`** — critical path; unlocks `composition`,
+   `capability`, `replay`, `release` (all Phase 3). UCs unlocked
+   directly: UC-S05, UC-S06, UC-U15. (UC-U05 routes through
+   `repo.Service` so it stays `Specified` until Phase 4.)
 
-Both depend on `projection` (already Verified) and have no dependency on
-each other. Claim either row and update the ledger when impl + tests
-land in the same commit.
+All dependencies (`graph`, `projection`, `governance`, `identity`) are
+already Verified.
 
 ## Update protocol
 
