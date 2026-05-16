@@ -103,5 +103,10 @@ type Graph interface {
 	WithEdge(Edge) (Graph, error)
 	WithHyperedge(Hyperedge) (Graph, error)
 
+	// Empty returns a fresh empty graph that uses the same schema as the
+	// receiver. Used by callers that need to rebuild the graph minus
+	// some elements (e.g. revision's DPO rewrite).
+	Empty() Graph
+
 	Validate() error
 }

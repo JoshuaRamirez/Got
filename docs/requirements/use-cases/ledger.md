@@ -47,8 +47,8 @@ When a UC is retired:
 | [UC-U09](user/UC-U09-resolve-name.md) | Resolve a name to a vertex | Verified | `internal/namespace/mem.go` | `internal/namespace/namespace_test.go` | 2026-05-05 | Main path + unbound-name failure path covered. |
 | [UC-U10](user/UC-U10-query-graph.md) | Query the graph | Verified | `internal/graph/mem.go` | `internal/graph/graph_test.go` | 2026-05-05 | `Vertex`/`Edge`/`Hyperedge`/`VertexIDs`/`Induce` covered; `Query` returns `ErrQueryUnsupported` (covered). |
 | [UC-U11](user/UC-U11-trace-provenance.md) | Trace causal provenance | Verified | `internal/provenance/engine.go` | `internal/provenance/provenance_test.go` | 2026-05-05 | All four read methods covered including reflexivity, monotonicity, idempotence axioms. |
-| [UC-U12](user/UC-U12-trace-authorship.md) | Trace authorship and responsibility | Specified | `internal/multiagent` (interface) | — | 2026-05-05 | Awaits `multiagent.Engine` impl. |
-| [UC-U13](user/UC-U13-check-freshness.md) | Check temporal freshness of a vertex | Specified | `internal/temporal` (interface) | — | 2026-05-05 | Awaits `temporal.Engine` impl. |
+| [UC-U12](user/UC-U12-trace-authorship.md) | Trace authorship and responsibility | Verified | `internal/multiagent/engine.go` | `internal/multiagent/multiagent_test.go` | 2026-05-05 | Authorship and ResponsibilityTrace covered; ErrNoAuthorship and graph.ErrVertexNotFound failure paths exercised. |
+| [UC-U13](user/UC-U13-check-freshness.md) | Check temporal freshness of a vertex | Verified | `internal/temporal/engine.go` | `internal/temporal/temporal_test.go` | 2026-05-05 | Validity, Fresh half-open semantics, indefinite-`ValidTo`, malformed triple, and unknown-vertex paths covered. |
 | [UC-U14](user/UC-U14-replay-capsule.md) | Replay a change capsule | Specified | `internal/replay` (interface) | — | 2026-05-05 | Awaits `replay.Engine` and `revision.Engine` impls. |
 | [UC-U15](user/UC-U15-prove-claim.md) | Prove a claim with a proof | Specified | `internal/verification` (interface) | — | 2026-05-05 | Awaits `verification.Engine` impl. |
 | [UC-U16](user/UC-U16-detect-emergent-capability.md) | Detect an emergent capability | Specified | `internal/capability` (interface) | — | 2026-05-05 | Awaits `capability.Engine` impl. |
@@ -59,7 +59,7 @@ When a UC is retired:
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
 |---|---|---|---|---|---|---|
 | [UC-S01](system/UC-S01-validate-graph.md) | Validate graph well-formedness | Verified | `internal/graph/mem.go` (`Validate`) | `internal/graph/graph_test.go` | 2026-05-05 | All four `ErrNotWellFormed` failure modes exercised. |
-| [UC-S02](system/UC-S02-apply-dpo-rewrite.md) | Apply a DPO rewrite | Specified | `internal/revision` (interface) | — | 2026-05-05 | Awaits `revision.Engine.Apply` impl. |
+| [UC-S02](system/UC-S02-apply-dpo-rewrite.md) | Apply a DPO rewrite | Verified | `internal/revision/engine.go` (`Apply`) | `internal/revision/revision_test.go` | 2026-05-05 | Add-vertex, add-edge, delete-vertex paths; ErrNoMatch and ErrSideConditionFailed failure paths exercised. |
 | [UC-S03](system/UC-S03-compute-pushout.md) | Compute the guarded pushout of two frontiers | Specified | `internal/composition` (interface) | — | 2026-05-05 | Awaits `composition.Engine.Merge` impl. |
 | [UC-S04](system/UC-S04-resolve-conflicts.md) | Apply conflict resolutions | Specified | `internal/composition` (interface) | — | 2026-05-05 | Awaits `composition.Engine.Resolve` impl. |
 | [UC-S05](system/UC-S05-evaluate-in-environment.md) | Evaluate a frontier in a given environment | Specified | `internal/verification` (interface) | — | 2026-05-05 | Awaits `verification.Engine.Evaluate` impl. |
@@ -67,8 +67,8 @@ When a UC is retired:
 | [UC-S07](system/UC-S07-compute-provenance-closure.md) | Compute the provenance closure of a seed set | Verified | `internal/provenance/engine.go` (`Close`) | `internal/provenance/provenance_test.go` | 2026-05-05 | Extensivity, monotonicity, idempotence axioms tested. |
 | [UC-S08](system/UC-S08-compute-provenance-cone.md) | Compute the provenance cone of a vertex | Verified | `internal/provenance/engine.go` (`Cone`) | `internal/provenance/provenance_test.go` | 2026-05-05 | `Cone == Close({seed})` axiom tested. |
 | [UC-S09](system/UC-S09-enumerate-causal-traces.md) | Enumerate causal traces between two vertices | Verified | `internal/provenance/engine.go` (`TraceSet`) | `internal/provenance/provenance_test.go` | 2026-05-05 | Simple-path enumeration verified. |
-| [UC-S10](system/UC-S10-select-frontier.md) | Select a frontier from the graph | Specified | `internal/projection` (interface) | — | 2026-05-05 | Awaits `projection.Engine.Select` impl. |
-| [UC-S11](system/UC-S11-apply-projection-spec.md) | Apply a full projection spec | Specified | `internal/projection` (interface) | — | 2026-05-05 | Awaits `projection.Engine.Project` impl. |
+| [UC-S10](system/UC-S10-select-frontier.md) | Select a frontier from the graph | Verified | `internal/projection/engine.go` (`Select`, `IDsSelector`) | `internal/projection/projection_test.go` | 2026-05-05 | Main path, empty selector, ErrInvalidSelector failure paths, ctx cancellation covered. |
+| [UC-S11](system/UC-S11-apply-projection-spec.md) | Apply a full projection spec | Verified | `internal/projection/engine.go` (`Project`, `InduceSpec`) | `internal/projection/projection_test.go` | 2026-05-05 | Main path + spec-error failure path covered. |
 | [UC-S12](system/UC-S12-check-policy-aggregate.md) | Check the aggregate decision over a policy set | Specified | `internal/governance` (interface) | — | 2026-05-05 | Awaits `governance.Engine.Check` impl. |
 | [UC-S13](system/UC-S13-gate-release.md) | Gate a frontier for release | Specified | `internal/governance` (interface) | — | 2026-05-05 | Awaits `governance.Engine.GateRelease` impl. |
 | [UC-S14](system/UC-S14-materialize-for-target.md) | Materialize a view for a specific target | Specified | `internal/realization` (interface) | — | 2026-05-05 | Awaits `realization.Engine.Materialize` impl. |
@@ -76,8 +76,8 @@ When a UC is retired:
 | [UC-S16](system/UC-S16-resolve-binding.md) | Resolve a name binding | Verified | `internal/namespace/mem.go` (`Resolve*`) | `internal/namespace/namespace_test.go` | 2026-05-05 | Bound + unbound paths covered. |
 | [UC-S17](system/UC-S17-compute-content-id.md) | Compute a content-addressed identifier | Verified | `internal/identity/sha256.go` | `internal/identity/identity_test.go` | 2026-05-05 | SHA-256-backed factory; canonical-bytes contract covered. |
 | [UC-S18](system/UC-S18-check-ontology-admissibility.md) | Check whether an edge or hyperedge is admissible | Verified | `internal/ontology/schema.go` | `internal/ontology/schema_test.go` | 2026-05-05 | Edge and hyperedge admissibility tables exercised. |
-| [UC-S19](system/UC-S19-check-replay-feasibility.md) | Check whether a change capsule is replayable | Specified | `internal/revision` (interface) | — | 2026-05-05 | Awaits `revision.Engine.Replayable` impl. |
-| [UC-S20](system/UC-S20-check-temporal-validity.md) | Check the temporal validity of a vertex | Specified | `internal/temporal` (interface) | — | 2026-05-05 | Awaits `temporal.Engine.Validity` impl. |
+| [UC-S19](system/UC-S19-check-replay-feasibility.md) | Check whether a change capsule is replayable | Verified | `internal/revision/engine.go` (`Replayable`) | `internal/revision/revision_test.go` | 2026-05-05 | Happy path, empty capsule, consumed-missing, produced-missing failure paths covered. |
+| [UC-S20](system/UC-S20-check-temporal-validity.md) | Check the temporal validity of a vertex | Verified | `internal/temporal/engine.go` (`Validity`) | `internal/temporal/temporal_test.go` | 2026-05-05 | Main path, malformed-triple and unknown-vertex failure paths covered. |
 
 ## Summary
 
@@ -85,27 +85,23 @@ As of 2026-05-05:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 13 | 1 | 0 | 3 | 0 | 17 |
-| System | 12 | 0 | 0 | 8 | 0 | 20 |
-| **Total** | **25** | **1** | **0** | **11** | **0** | **37** |
+| User | 11 | 1 | 0 | 5 | 0 | 17 |
+| System | 7 | 0 | 0 | 13 | 0 | 20 |
+| **Total** | **18** | **1** | **0** | **18** | **0** | **37** |
 
-Verified coverage: 11 / 37 = 30%. The verified set is bounded by which
-packages have concrete implementations (`graph`, `identity`, `namespace`,
-`ontology`, `provenance`); every UC routed through one of those is
-verified, every UC routed only through the twelve interface-only packages
-remains `Specified`.
+Verified coverage: 18 / 37 ≈ 49%. Phase 1A complete (see `roadmap.md`):
+`projection`, `revision`, `temporal`, `multiagent` are all implemented
+and tested. Active phase advances to Phase 1B (`governance`,
+`realization`).
 
 ## Next-bite candidates
 
-The smallest set of impls that would convert the most UCs to `Verified`:
+Per `roadmap.md`, the active phase is now **Phase 1B**:
 
-1. `governance.Engine` impl — verifies UC-S12 and UC-S13 directly, unblocks
-   later certification flows.
-2. `verification.Engine` impl — verifies UC-S05, UC-S06, UC-U05, UC-U15.
-3. `composition.Engine` impl — verifies UC-S03, UC-S04, UC-U04, UC-U17.
-4. `repo.Service` impl on top of the above — verifies UC-U01..UC-U06.
+1. **`governance.Engine`** — verifies UC-S12 and UC-S13. On the critical
+   path to `verification` → `composition` → `repo`.
+2. **`realization.Engine`** — verifies UC-S14. Needed by `repo` but off
+   the critical path.
 
-Order matters: `governance` and `verification` are preconditions for
-`composition`, which is a precondition for `repo`. `temporal`,
-`multiagent`, `projection`, `realization`, `release`, `replay`, `revision`,
-`capability` are independently implementable in parallel.
+Both depend on `projection` (Verified in Phase 1A) and can be implemented
+in parallel.

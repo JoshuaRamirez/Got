@@ -34,6 +34,10 @@ func NewGraph(schema ontology.Schema) Graph {
 	}
 }
 
+func (g *memGraph) Empty() Graph {
+	return NewGraph(g.schema)
+}
+
 func (g *memGraph) Vertex(id identity.VertexID) (Vertex, bool) {
 	v, ok := g.vertices[id]
 	return v, ok
