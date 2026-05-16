@@ -98,18 +98,16 @@ governance → verification → composition → repo`. Five packages.
 
 **Cumulative**: 21 / 37 Verified (+3 from Phase 1A).
 
-### Phase 2 — Depends on `governance`
+### Phase 2 — Done
 
-| Package | Deps in this layer | UCs unlocked |
-|---|---|---|
-| `verification` | `governance`, `projection` | UC-S05, UC-S06, UC-U15 |
+| Package | UCs Verified |
+|---|---|
+| `verification` | UC-S05, UC-S06, UC-U15 |
 
-**Cumulative**: 24 / 37 Verified (+3).
+**Cumulative**: 24 / 37 Verified (+3 from Phase 1B).
 
-UC-U05 is **not** unlocked here — its scope is `repo.Service.Evaluate`,
-which still needs the `repo` facade. Same for UC-U04 (Merge), UC-U06
-(Materialize), and UC-U17 (Resolve conflicts) — all routed through
-`repo.Service`.
+UC-U05, UC-U04, UC-U06, UC-U17 are still `Specified` — they route
+through `repo.Service` which lands in Phase 4.
 
 ### Phase 3 — Depends on `verification`
 
@@ -148,16 +146,16 @@ All four can be implemented in parallel.
 
 ## Current focus
 
-**Active phase: Phase 2.** Phases 0, 1A, and 1B are all complete. One
-package remains in Phase 2:
+**Active phase: Phase 3.** Phases 0–2 are all complete. Four
+parallel-safe packages remain in Phase 3, all dependent only on
+`verification` (and the lower-layer packages that are already Verified):
 
-1. **`verification`** — critical path; unlocks `composition`,
-   `capability`, `replay`, `release` (all Phase 3). UCs unlocked
-   directly: UC-S05, UC-S06, UC-U15. (UC-U05 routes through
-   `repo.Service` so it stays `Specified` until Phase 4.)
+1. **`composition`** — critical path to `repo`. UCs: UC-S03, UC-S04.
+2. **`replay`** — UC-U14.
+3. **`capability`** — UC-U16.
+4. **`release`** — UC-U07, UC-U08.
 
-All dependencies (`graph`, `projection`, `governance`, `identity`) are
-already Verified.
+None depends on the others within this phase. Claim any row.
 
 ## Update protocol
 
