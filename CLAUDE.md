@@ -43,6 +43,8 @@ level).
 
 ## Canonical references
 
+- `/docs/architecture.md` — top-down system overview (layers, packages,
+  spec/impl divergence, performance, concurrency).
 - `/docs/requirements/use-cases/index.md` — full UC catalogue index.
 - `/docs/requirements/use-cases/ledger.md` — UC implementation /
   verification status (what is done).
@@ -50,6 +52,7 @@ level).
   (what to do next, by dependency layer).
 - `/docs/design-rules.md` — full API design rules with rationale.
 - `/docs/devlog/YYYY-MM-DD.md` — chronological journal.
+- `/CHANGELOG.md` — release-oriented summary of notable changes.
 - `/README.md` — user-facing setup / build / test.
 
 ## Outstanding manual tasks
