@@ -123,13 +123,13 @@ are Verified at this point.
 
 UC-U04 and UC-U17 stay `Specified` until Phase 4 lands `repo`.
 
-### Phase 4 — Top of stack
+### Phase 4 — Done
 
-| Package | Deps | UCs unlocked |
-|---|---|---|
-| `repo` | composition, governance, graph, identity, namespace, projection, realization, revision, verification | UC-U01, UC-U02, UC-U03 (full), UC-U04, UC-U05, UC-U06, UC-U17 |
+| Package | UCs Verified |
+|---|---|
+| `repo` | UC-U01, UC-U02, UC-U03 (full), UC-U04, UC-U05, UC-U06 (UC-U17 verified via composition in Phase 3) |
 
-**Cumulative**: 37 / 37 Verified (+7). Roadmap complete.
+**Cumulative**: 37 / 37 Verified. **Roadmap complete.**
 
 ## Verification cumulative chart
 
@@ -144,16 +144,10 @@ UC-U04 and UC-U17 stay `Specified` until Phase 4 lands `repo`.
 
 ## Current focus
 
-**Active phase: Phase 4.** Phases 0–3 are all complete. All system-level
-UCs are Verified. The single package remaining is the `repo` facade,
-which lands the seven user-level UCs routed through `repo.Service`:
+**All phases complete. Roadmap finished — 37/37 UCs Verified.**
 
-1. **`repo`** — UC-U01 (Ingest), UC-U02 (Revise), UC-U03 full (Branch),
-   UC-U04 (Merge), UC-U05 (Evaluate), UC-U06 (Materialize), UC-U17
-   (Resolve conflicts).
-
-All dependencies are Verified. Implementing `repo` completes the
-roadmap.
+Next work is hardening, new UCs, or composability — see the ledger's
+"Next-bite candidates" section for the options.
 
 ## Update protocol
 

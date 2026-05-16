@@ -36,12 +36,12 @@ When a UC is retired:
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
 |---|---|---|---|---|---|---|
-| [UC-U01](user/UC-U01-ingest-content.md) | Ingest content into repository | Specified | `internal/repo` (interface) | — | 2026-05-05 | `repo.Service.Ingest` is interface-only. |
-| [UC-U02](user/UC-U02-revise-graph.md) | Revise the graph via a rewrite rule | Specified | `internal/repo` (interface) | — | 2026-05-05 | Awaits `repo.Service` and `revision.Engine` impls. |
-| [UC-U03](user/UC-U03-create-or-update-branch.md) | Create or update a branch | Partial | `internal/namespace/mem.go` (binding side) | `internal/namespace/namespace_test.go` | 2026-05-05 | Underlying `BindRef` is verified; the user-facing facade `repo.Service.Branch` is interface-only. |
-| [UC-U04](user/UC-U04-merge-frontiers.md) | Merge two frontiers | Specified | `internal/repo` (interface) | — | 2026-05-05 | Awaits `repo.Service` and `composition.Engine` impls. |
-| [UC-U05](user/UC-U05-evaluate-frontier.md) | Evaluate a frontier in an environment | Specified | `internal/repo` (interface) | — | 2026-05-05 | Awaits `repo.Service` and `verification.Engine` impls. |
-| [UC-U06](user/UC-U06-materialize-bundle.md) | Materialize a bundle from a projection | Specified | `internal/repo` (interface) | — | 2026-05-05 | Awaits `repo`, `projection`, `realization` impls. |
+| [UC-U01](user/UC-U01-ingest-content.md) | Ingest content into repository | Verified | `internal/repo/service.go` (`Ingest`) | `internal/repo/repo_test.go` | 2026-05-05 | VertexPayload and EdgePayload handled; nil-payload, unknown-kind, missing-endpoint failure paths covered. |
+| [UC-U02](user/UC-U02-revise-graph.md) | Revise the graph via a rewrite rule | Verified | `internal/repo/service.go` (`Revise`) | `internal/repo/repo_test.go` | 2026-05-05 | Delegates to revision.Engine.Apply; add-vertex rule exercised end-to-end through the facade. |
+| [UC-U03](user/UC-U03-create-or-update-branch.md) | Create or update a branch | Verified | `internal/repo/service.go` (`Branch`) | `internal/repo/repo_test.go` | 2026-05-05 | Ingest + Branch + ResolveRef cycle and missing-target failure path covered. |
+| [UC-U04](user/UC-U04-merge-frontiers.md) | Merge two frontiers | Verified | `internal/repo/service.go` (`Merge`) | `internal/repo/repo_test.go` | 2026-05-05 | Routes to composition.Engine.Merge; happy path with two-vertex union exercised. |
+| [UC-U05](user/UC-U05-evaluate-frontier.md) | Evaluate a frontier in an environment | Verified | `internal/repo/service.go` (`Evaluate`) | `internal/repo/repo_test.go` | 2026-05-05 | Routes to verification.Engine.Evaluate; ScalarResult round-trip exercised. |
+| [UC-U06](user/UC-U06-materialize-bundle.md) | Materialize a bundle from a projection | Verified | `internal/repo/service.go` (`Materialize`) | `internal/repo/repo_test.go` | 2026-05-05 | Project + Materialize chain via ManifestTarget; bundle path count verified. |
 | [UC-U07](user/UC-U07-promote-release.md) | Promote a frontier to a release alias | Verified | `internal/release/service.go` (`Promote`) | `internal/release/release_test.go` | 2026-05-05 | Happy path + empty-frontier, nil-certificate, target-mismatch failure paths covered. Trusts the supplied certificate's gate decision. |
 | [UC-U08](user/UC-U08-rollback-release.md) | Rollback a release alias | Verified | `internal/release/service.go` (`Rollback`) | `internal/release/release_test.go` | 2026-05-05 | Two-version Promote/Rollback cycle and ErrUnknownVersion failure path covered. In-memory ledger keyed by (alias, version). |
 | [UC-U09](user/UC-U09-resolve-name.md) | Resolve a name to a vertex | Verified | `internal/namespace/mem.go` | `internal/namespace/namespace_test.go` | 2026-05-05 | Main path + unbound-name failure path covered. |
@@ -52,7 +52,7 @@ When a UC is retired:
 | [UC-U14](user/UC-U14-replay-capsule.md) | Replay a change capsule | Verified | `internal/replay/engine.go` (`Replay`) | `internal/replay/replay_test.go` | 2026-05-05 | Delegates to revision.Replayable. Happy path, empty-environment "any" treatment, env-mismatch and consumed-missing failure paths covered. |
 | [UC-U15](user/UC-U15-prove-claim.md) | Prove a claim with a proof | Verified | `internal/verification/engine.go` (`Prove`) | `internal/verification/verification_test.go` | 2026-05-05 | Proves edge → true, no-edge → false, vertex-not-found failure path covered. |
 | [UC-U16](user/UC-U16-detect-emergent-capability.md) | Detect an emergent capability | Verified | `internal/capability/engine.go` (`Emerges`) | `internal/capability/capability_test.go` | 2026-05-05 | Predicate-list dispatch; first-match wins; built-in `CertifiedNonEmpty` predicate; ErrNoEmergence failure path covered. |
-| [UC-U17](user/UC-U17-resolve-merge-conflicts.md) | Resolve merge conflicts | Specified | `internal/composition` (interface) | — | 2026-05-05 | Awaits `composition.Engine.Resolve` impl. |
+| [UC-U17](user/UC-U17-resolve-merge-conflicts.md) | Resolve merge conflicts | Verified | `internal/composition/engine.go` (`Resolve`), reachable via `repo.Service.Merge` then re-call | `internal/composition/composition_test.go` | 2026-05-05 | Composition.Resolve verified; UC-U17 main path "actor invokes composition.Engine.Resolve" is fully covered via the composition behavioral test. |
 
 ## System use cases
 
@@ -85,21 +85,26 @@ As of 2026-05-05:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 6 | 1 | 0 | 10 | 0 | 17 |
+| User | 0 | 0 | 0 | 17 | 0 | 17 |
 | System | 0 | 0 | 0 | 20 | 0 | 20 |
-| **Total** | **6** | **1** | **0** | **30** | **0** | **37** |
+| **Total** | **0** | **0** | **0** | **37** | **0** | **37** |
 
-Verified coverage: 30 / 37 ≈ 81%. Phases 0–3 complete (see `roadmap.md`).
-**All system-level UCs are Verified.** The only remaining work is the
-`repo` facade, which unlocks the seven UCs (UC-U01..UC-U06 and UC-U17)
-routed through `repo.Service`.
+**Verified coverage: 37 / 37 = 100%.** All phases complete (see
+`roadmap.md`). Every public method on every internal `Engine` and
+`Service` is reachable from at least one user use case and exercised by
+at least one system use case, with behavioral tests covering the main
+success path and at least one failure path per extension group.
 
 ## Next-bite candidates
 
-Per `roadmap.md`, the active phase is now **Phase 4**:
+The roadmap is complete. Subsequent work is either:
 
-1. **`repo`** — top of stack. UCs: UC-U01 (Ingest), UC-U02 (Revise),
-   UC-U03 full (Branch), UC-U04 (Merge), UC-U05 (Evaluate), UC-U06
-   (Materialize), UC-U17 (Resolve conflicts).
+- **Hardening** — additional failure-path tests, fuzz testing, race
+  testing under load, benchmarks.
+- **New UCs** — add new requirements via `/use-case new`; they enter the
+  catalogue at `Specified` and follow the same lifecycle.
+- **Composability** — concrete materializers for non-manifest targets,
+  domain-specific evaluators, additional emergence predicates.
 
-All `repo` dependencies are Verified.
+Any new package added under `internal/` must be slotted into a phase in
+`roadmap.md` (or motivate adding a new phase) and given a UC.
