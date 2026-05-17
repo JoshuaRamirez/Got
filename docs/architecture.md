@@ -185,6 +185,14 @@ These simplifications are intentional and isolated to the package
 implementations. The UC specs and interface contracts remain the
 target for a future categorical implementation.
 
+The trade-off analysis for converting `composition.Merge` to a full
+per-medium implementation — including the seven information media, the
+five decision points (data source, equivalence predicates, witness ID
+stability, resolver expressiveness, conflict noise), and the
+recommended bridge (a `Lenient`/`Strict` strictness flag on `Merge`)
+— is recorded in `docs/devlog/2026-05-17.md`. Same shape applies to
+`revision.Apply` for pushout-complement / dangling-edge detection.
+
 ## Performance characteristics
 
 Measured at n=1000 vertices on a single CPU:
