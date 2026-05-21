@@ -73,7 +73,10 @@ func (e *DefaultEngine) Merge(ctx context.Context, g graph.Graph, left, right pr
 	merged := &mergedFrontier{ids: union}
 
 	if e.strictness == Strict {
-		if conflicts := strictAudit(g, union); len(conflicts) > 0 {
+		var conflicts []Conflict
+		conflicts = append(conflicts, strictAudit(g, union)...)
+		conflicts = append(conflicts, perSideAudit(left, right)...)
+		if len(conflicts) > 0 {
 			return MergeResult{Conflicts: conflicts}, nil
 		}
 	}
@@ -179,6 +182,115 @@ func structuralAudit(g graph.Graph, idSet map[identity.VertexID]bool) []Conflict
 		seen[key] = curType
 	}
 	return conflicts
+}
+
+// perSideAudit runs when both frontiers satisfy projection.Edited. It
+// compares each side's view of the same vertex ID and emits typed
+// conflicts for disagreement on type, attrs, time, or trust. Vertices
+// present in only one side's edit map are not conflicts — they are
+// additions, which are the normal merge case.
+//
+// Equivalence is bitwise today. Future refinement (canonical JSON for
+// Attrs, interval intersection for Time) can be added per the open
+// decision in docs/devlog/2026-05-17.md.
+func perSideAudit(left, right projection.Frontier) []Conflict {
+	leftE, lok := left.(projection.Edited)
+	rightE, rok := right.(projection.Edited)
+	if !lok || !rok {
+		return nil
+	}
+	leftV := leftE.VertexEdits()
+	rightV := rightE.VertexEdits()
+	leftEd := leftE.EdgeEdits()
+	rightEd := rightE.EdgeEdits()
+
+	var conflicts []Conflict
+
+	// Stable iteration: walk the union of IDs in deterministic-ish
+	// order via the leftV map first, then any right-only IDs (only
+	// matters for tests; production callers should not rely on order).
+	for id, lv := range leftV {
+		rv, ok := rightV[id]
+		if !ok {
+			continue
+		}
+		if lv.Type != rv.Type {
+			conflicts = append(conflicts, auditConflict{
+				kind:     Schema,
+				boundary: []identity.VertexID{id},
+				detail:   fmt.Sprintf("type %q vs %q", lv.Type, rv.Type),
+			})
+		}
+		if lv.Trust != rv.Trust {
+			conflicts = append(conflicts, auditConflict{
+				kind:     Trust,
+				boundary: []identity.VertexID{id},
+				detail:   fmt.Sprintf("trust (%d, %q) vs (%d, %q)", lv.Trust.Score, lv.Trust.Class, rv.Trust.Score, rv.Trust.Class),
+			})
+		}
+		if lv.Time != rv.Time {
+			conflicts = append(conflicts, auditConflict{
+				kind:     Temporal,
+				boundary: []identity.VertexID{id},
+				detail:   fmt.Sprintf("time %+v vs %+v", lv.Time, rv.Time),
+			})
+		}
+		for k, lval := range lv.Attrs {
+			if rval, ok := rv.Attrs[k]; ok && !attrsEqual(lval, rval) {
+				conflicts = append(conflicts, auditConflict{
+					kind:     Textual,
+					boundary: []identity.VertexID{id},
+					detail:   fmt.Sprintf("attr %q: %v vs %v", k, lval, rval),
+				})
+			}
+		}
+	}
+
+	// Edge edits: same (from, to) but different types is a Structural
+	// conflict surfaced at the per-side level too. Distinct IDs aren't
+	// conflicts on their own.
+	type pair struct{ from, to identity.VertexID }
+	for _, le := range leftEd {
+		for _, re := range rightEd {
+			if le.From == re.From && le.To == re.To && le.Type != re.Type {
+				conflicts = append(conflicts, auditConflict{
+					kind:     Structural,
+					boundary: []identity.VertexID{le.From, le.To},
+					detail:   fmt.Sprintf("edge types %q vs %q on the same endpoints", le.Type, re.Type),
+				})
+			}
+		}
+	}
+
+	return conflicts
+}
+
+// attrsEqual is the conservative default equivalence for AttrMap values.
+// Comparable values use ==; everything else uses fmt.Sprint comparison
+// as a stand-in for canonical equality. Domain-specific predicates can
+// be added later (see equivalence-predicates open decision in
+// docs/devlog/2026-05-17.md).
+func attrsEqual(a, b any) bool {
+	type comparablePair struct{ a, b any }
+	defer func() { _ = recover() }()
+	// Try == first; recover from non-comparable panic via fmt fallback.
+	if eq, ok := tryEqual(comparablePair{a: a, b: b}); ok {
+		return eq
+	}
+	return fmt.Sprint(a) == fmt.Sprint(b)
+}
+
+// tryEqual reports whether a == b is a valid Go comparison. The defer/
+// recover in the caller covers the panic case; this helper returns ok=true
+// when the types support direct comparison.
+func tryEqual(p struct{ a, b any }) (eq bool, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			eq = false
+			ok = false
+		}
+	}()
+	return p.a == p.b, true
 }
 
 // temporalAudit detects vertices in the merged frontier whose TimeTriple

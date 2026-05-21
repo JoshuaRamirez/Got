@@ -43,6 +43,58 @@ type Frontier interface {
 	VertexIDs() []identity.VertexID
 }
 
+// Edited is an optional capability a Frontier may satisfy to carry the
+// per-side vertex and edge data that produced it. Used by
+// composition.DefaultEngine in Strict mode to detect content-level
+// disagreement between left and right frontiers — Textual (Attrs),
+// Schema (VertexType), Trust (TrustAnnotation), and Temporal (TimeTriple).
+//
+// Frontiers that do not satisfy Edited (the default IDsSelector-derived
+// frontier among them) still merge correctly under Strict; the per-side
+// audits simply do not run.
+//
+// VertexEdits maps a vertex ID to the Vertex value this frontier "thinks"
+// it has, including type, attrs, time, and trust. EdgeEdits maps an edge
+// ID to its Edge value. Both maps may be empty; presence is per-id.
+type Edited interface {
+	Frontier
+	VertexEdits() map[identity.VertexID]graph.Vertex
+	EdgeEdits() map[identity.EdgeID]graph.Edge
+}
+
+// EditedFrontier is a concrete Frontier that carries per-side vertex and
+// edge data alongside the vertex ID list. Construct one via
+// NewEditedFrontier; the resulting value satisfies both Frontier and
+// Edited.
+type EditedFrontier struct {
+	IDs      []identity.VertexID
+	Vertices map[identity.VertexID]graph.Vertex
+	Edges    map[identity.EdgeID]graph.Edge
+}
+
+// NewEditedFrontier builds an EditedFrontier with empty maps. Callers
+// populate Vertices and Edges before passing the frontier to Merge.
+func NewEditedFrontier(ids []identity.VertexID) *EditedFrontier {
+	return &EditedFrontier{
+		IDs:      append([]identity.VertexID(nil), ids...),
+		Vertices: make(map[identity.VertexID]graph.Vertex),
+		Edges:    make(map[identity.EdgeID]graph.Edge),
+	}
+}
+
+// VertexIDs satisfies Frontier.
+func (f *EditedFrontier) VertexIDs() []identity.VertexID { return f.IDs }
+
+// VertexEdits satisfies Edited.
+func (f *EditedFrontier) VertexEdits() map[identity.VertexID]graph.Vertex {
+	return f.Vertices
+}
+
+// EdgeEdits satisfies Edited.
+func (f *EditedFrontier) EdgeEdits() map[identity.EdgeID]graph.Edge {
+	return f.Edges
+}
+
 // View is the result of applying a projection: a subgraph derived from the
 // graph according to a Spec.
 type View interface {
