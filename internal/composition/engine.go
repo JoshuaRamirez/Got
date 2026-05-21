@@ -219,6 +219,7 @@ func perSideAudit(left, right projection.Frontier) []Conflict {
 				kind:     Schema,
 				boundary: []identity.VertexID{id},
 				detail:   fmt.Sprintf("type %q vs %q", lv.Type, rv.Type),
+				payload:  SchemaPayload{Vertex: id, LeftType: lv.Type, RightType: rv.Type},
 			})
 		}
 		if lv.Trust != rv.Trust {
@@ -226,6 +227,7 @@ func perSideAudit(left, right projection.Frontier) []Conflict {
 				kind:     Trust,
 				boundary: []identity.VertexID{id},
 				detail:   fmt.Sprintf("trust (%d, %q) vs (%d, %q)", lv.Trust.Score, lv.Trust.Class, rv.Trust.Score, rv.Trust.Class),
+				payload:  TrustPayload{Vertex: id, Left: lv.Trust, Right: rv.Trust},
 			})
 		}
 		if lv.Time != rv.Time {
@@ -233,6 +235,7 @@ func perSideAudit(left, right projection.Frontier) []Conflict {
 				kind:     Temporal,
 				boundary: []identity.VertexID{id},
 				detail:   fmt.Sprintf("time %+v vs %+v", lv.Time, rv.Time),
+				payload:  TemporalPayload{Vertex: id, Left: lv.Time, Right: rv.Time},
 			})
 		}
 		for k, lval := range lv.Attrs {
@@ -241,6 +244,7 @@ func perSideAudit(left, right projection.Frontier) []Conflict {
 					kind:     Textual,
 					boundary: []identity.VertexID{id},
 					detail:   fmt.Sprintf("attr %q: %v vs %v", k, lval, rval),
+					payload:  TextualPayload{Vertex: id, Key: k, Left: lval, Right: rval},
 				})
 			}
 		}
@@ -257,6 +261,10 @@ func perSideAudit(left, right projection.Frontier) []Conflict {
 					kind:     Structural,
 					boundary: []identity.VertexID{le.From, le.To},
 					detail:   fmt.Sprintf("edge types %q vs %q on the same endpoints", le.Type, re.Type),
+					payload: StructuralPayload{
+						From: le.From, To: le.To,
+						LeftType: le.Type, RightType: re.Type,
+					},
 				})
 			}
 		}
@@ -333,12 +341,14 @@ func (c policyConflict) Boundary() []identity.VertexID        { return c.boundar
 func (c policyConflict) Obligations() []governance.Obligation { return c.obligations }
 
 // auditConflict carries a strict-audit-generated conflict with a
-// free-text detail string. Kept distinct from policyConflict so callers
-// that type-assert can route on the source.
+// free-text detail string and an optional typed payload. Kept distinct
+// from policyConflict so callers that type-assert can route on the
+// source.
 type auditConflict struct {
 	kind     ConflictKind
 	boundary []identity.VertexID
 	detail   string
+	payload  any
 }
 
 func (c auditConflict) Kind() ConflictKind            { return c.kind }
@@ -347,6 +357,12 @@ func (c auditConflict) Boundary() []identity.VertexID { return c.boundary }
 // Detail returns the human-readable explanation for this audit conflict.
 // Not part of the Conflict interface; callers type-assert to access it.
 func (c auditConflict) Detail() string { return c.detail }
+
+// Payload satisfies the Payloaded interface. Audit conflicts emitted by
+// the per-side audit attach a typed payload (one of SchemaPayload,
+// TextualPayload, TrustPayload, TemporalPayload, StructuralPayload).
+// Conflicts emitted by the in-graph audit may have a nil payload.
+func (c auditConflict) Payload() any { return c.payload }
 
 func unionVertexIDs(a, b projection.Frontier) []identity.VertexID {
 	seen := make(map[identity.VertexID]bool)
