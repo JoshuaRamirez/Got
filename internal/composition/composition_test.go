@@ -413,6 +413,213 @@ func TestStrictMergeStillRunsPolicyGate(t *testing.T) {
 	}
 }
 
+// --- Per-side audit tests (Edited frontiers) ---
+
+func mkEditedFrontier(t *testing.T, vs ...graph.Vertex) *projection.EditedFrontier {
+	t.Helper()
+	ids := make([]identity.VertexID, 0, len(vs))
+	for _, v := range vs {
+		ids = append(ids, v.ID)
+	}
+	f := projection.NewEditedFrontier(ids)
+	for _, v := range vs {
+		f.Vertices[v.ID] = v
+	}
+	return f
+}
+
+// Two Edited frontiers disagreeing on the Type of the same vertex →
+// Schema conflict.
+func TestStrictPerSideSchemaConflict(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-schema")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Artifact})
+
+	e, _ := newStrictEngines(t)
+	left := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Artifact})
+	right := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Revision})
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Schema) {
+		t.Fatalf("expected Schema conflict, got %v", mr.Conflicts)
+	}
+}
+
+// Two Edited frontiers disagreeing on Attrs of the same vertex →
+// Textual conflict.
+func TestStrictPerSideTextualConflict(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-attrs")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Artifact})
+
+	e, _ := newStrictEngines(t)
+	left := mkEditedFrontier(t, graph.Vertex{
+		ID: id, Type: ontology.Artifact,
+		Attrs: graph.AttrMap{"status": "draft"},
+	})
+	right := mkEditedFrontier(t, graph.Vertex{
+		ID: id, Type: ontology.Artifact,
+		Attrs: graph.AttrMap{"status": "review"},
+	})
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Textual) {
+		t.Fatalf("expected Textual conflict, got %v", mr.Conflicts)
+	}
+}
+
+// Two Edited frontiers disagreeing on Trust → Trust conflict.
+func TestStrictPerSideTrustConflict(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-trust")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Artifact})
+
+	e, _ := newStrictEngines(t)
+	left := mkEditedFrontier(t, graph.Vertex{
+		ID: id, Type: ontology.Artifact,
+		Trust: graph.TrustAnnotation{Score: 80, Class: "reviewer"},
+	})
+	right := mkEditedFrontier(t, graph.Vertex{
+		ID: id, Type: ontology.Artifact,
+		Trust: graph.TrustAnnotation{Score: 20, Class: "external"},
+	})
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Trust) {
+		t.Fatalf("expected Trust conflict, got %v", mr.Conflicts)
+	}
+}
+
+// Two Edited frontiers disagreeing on Time → Temporal conflict.
+func TestStrictPerSideTemporalConflict(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-time")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Artifact})
+
+	e, _ := newStrictEngines(t)
+	left := mkEditedFrontier(t, graph.Vertex{
+		ID: id, Type: ontology.Artifact,
+		Time: graph.TimeTriple{ValidFrom: 100, ValidTo: 200},
+	})
+	right := mkEditedFrontier(t, graph.Vertex{
+		ID: id, Type: ontology.Artifact,
+		Time: graph.TimeTriple{ValidFrom: 100, ValidTo: 300},
+	})
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Temporal) {
+		t.Fatalf("expected Temporal conflict, got %v", mr.Conflicts)
+	}
+}
+
+// Two Edited frontiers proposing different-typed edges on the same
+// (from, to) → Structural conflict from the per-side path.
+func TestStrictPerSideStructuralEdgeConflict(t *testing.T) {
+	ctx := context.Background()
+	a := vid("ps-edge-a")
+	b := vid("ps-edge-b")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: a, Type: ontology.Agent})
+	g, _ = g.WithVertex(graph.Vertex{ID: b, Type: ontology.Artifact})
+
+	e, _ := newStrictEngines(t)
+
+	left := projection.NewEditedFrontier([]identity.VertexID{a, b})
+	left.Vertices[a] = graph.Vertex{ID: a, Type: ontology.Agent}
+	left.Vertices[b] = graph.Vertex{ID: b, Type: ontology.Artifact}
+	left.Edges[eid("e-l")] = graph.Edge{ID: eid("e-l"), Type: ontology.AuthoredBy, From: a, To: b}
+
+	right := projection.NewEditedFrontier([]identity.VertexID{a, b})
+	right.Vertices[a] = graph.Vertex{ID: a, Type: ontology.Agent}
+	right.Vertices[b] = graph.Vertex{ID: b, Type: ontology.Artifact}
+	right.Edges[eid("e-r")] = graph.Edge{ID: eid("e-r"), Type: ontology.ApprovedBy, From: a, To: b}
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Structural) {
+		t.Fatalf("expected Structural conflict, got %v", mr.Conflicts)
+	}
+}
+
+// Both Edited frontiers agree on contents → no per-side conflicts.
+func TestStrictPerSideAgreement(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-agree")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Artifact})
+
+	e, _ := newStrictEngines(t)
+	same := graph.Vertex{
+		ID: id, Type: ontology.Artifact,
+		Attrs: graph.AttrMap{"status": "ok"},
+		Time:  graph.TimeTriple{ValidFrom: 100, ValidTo: 200},
+		Trust: graph.TrustAnnotation{Score: 50, Class: "trusted"},
+	}
+	left := mkEditedFrontier(t, same)
+	right := mkEditedFrontier(t, same)
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mr.Conflicts) != 0 {
+		t.Fatalf("expected no conflicts for identical edits, got %v", mr.Conflicts)
+	}
+}
+
+// One side Edited, other plain Frontier → per-side audit skipped, only
+// in-graph checks run.
+func TestStrictPerSideMixed(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-mixed")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Artifact})
+
+	e, pe := newStrictEngines(t)
+	plain := makeFrontier(t, pe, g, id)
+	edited := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Revision})
+
+	mr, err := e.Merge(ctx, g, plain, edited, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Per-side path is gated on BOTH satisfying Edited, so Schema
+	// (type disagreement) cannot fire here.
+	for _, c := range mr.Conflicts {
+		if c.Kind() == composition.Schema {
+			t.Fatalf("per-side Schema conflict should not fire when only one side is Edited; got %v", mr.Conflicts)
+		}
+	}
+}
+
+// hasKind reports whether any conflict in cs has the given kind.
+func hasKind(cs []composition.Conflict, k composition.ConflictKind) bool {
+	for _, c := range cs {
+		if c.Kind() == k {
+			return true
+		}
+	}
+	return false
+}
+
 // Strict mode's audit short-circuits the governance gate: when an audit
 // conflict fires, the policy check is skipped (Policy conflict not added).
 func TestStrictMergeAuditShortCircuitsGate(t *testing.T) {
