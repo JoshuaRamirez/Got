@@ -100,6 +100,12 @@ type Resolver interface {
 // frontiers may be nil if the original Merge did not use per-side data;
 // per-side resolvers become no-ops in that case.
 //
+// **Mutation note**: per-side resolvers (PreferLeftAttr,
+// PreferHigherTrust, etc.) mutate the supplied left/right frontiers in
+// place. Callers that want to retry ResolveTyped against the original
+// per-side data with a different resolver set should
+// projection.EditedFrontier.Clone() the inputs first.
+//
 // Unlike Resolve, which applies generic graph-mutating Resolutions
 // blindly, ResolveTyped routes each conflict to the resolver that
 // claims its kind. This makes typed resolution composable: callers
