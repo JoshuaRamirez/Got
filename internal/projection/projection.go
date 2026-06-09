@@ -95,6 +95,53 @@ func (f *EditedFrontier) EdgeEdits() map[identity.EdgeID]graph.Edge {
 	return f.Edges
 }
 
+// Clone returns an independent copy of the EditedFrontier. The IDs slice
+// and both maps are copied; each map value (Vertex, Edge) has its Attrs
+// field shallow-cloned so mutating clone.Vertices[id].Attrs[k] does not
+// affect the original. Attrs values themselves are not deep-copied — if
+// a caller stores reference-typed values (nested maps, slices) and
+// mutates them after Clone, both copies see the change.
+//
+// Intended use: composition.DefaultEngine.ResolveTyped mutates its
+// per-side frontiers in place when applying resolvers like
+// PreferLeftAttr. Callers that want to retry ResolveTyped with a
+// different resolver set against the original inputs should Clone
+// before each attempt.
+//
+// Clone on a nil receiver returns nil.
+func (f *EditedFrontier) Clone() *EditedFrontier {
+	if f == nil {
+		return nil
+	}
+	out := &EditedFrontier{
+		IDs:      append([]identity.VertexID(nil), f.IDs...),
+		Vertices: make(map[identity.VertexID]graph.Vertex, len(f.Vertices)),
+		Edges:    make(map[identity.EdgeID]graph.Edge, len(f.Edges)),
+	}
+	for k, v := range f.Vertices {
+		v.Attrs = cloneAttrs(v.Attrs)
+		out.Vertices[k] = v
+	}
+	for k, e := range f.Edges {
+		e.Attrs = cloneAttrs(e.Attrs)
+		out.Edges[k] = e
+	}
+	return out
+}
+
+// cloneAttrs returns a shallow copy of the supplied AttrMap. Values are
+// copied by assignment; reference-type values are not deep-cloned.
+func cloneAttrs(a graph.AttrMap) graph.AttrMap {
+	if a == nil {
+		return nil
+	}
+	out := make(graph.AttrMap, len(a))
+	for k, v := range a {
+		out[k] = v
+	}
+	return out
+}
+
 // View is the result of applying a projection: a subgraph derived from the
 // graph according to a Spec.
 type View interface {
