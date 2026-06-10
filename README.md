@@ -27,6 +27,29 @@ go build ./...
 go test -v -race ./...
 ```
 
+### Command-line shell
+
+`cmd/got` is a thin CLI over the library. It persists a single JSON state
+file under `$GOT_DIR` (default `.got`) and drives the library engines for
+each subcommand (see `docs/requirements/use-cases/user/UC-U19-operate-from-cli.md`).
+
+```bash
+go build -o got ./cmd/got
+
+./got init
+./got add-vertex exec --type Execution
+./got add-vertex art  --type Artifact
+./got add-edge   e1   --type materializes --from exec --to art
+./got list vertices
+./got bind main art
+./got resolve main
+./got trace exec art      # causal paths via the provenance engine
+./got cone exec           # provenance cone
+```
+
+Inadmissible edges are rejected by the graph's well-formedness check, so the
+CLI surfaces the same ontology guarantees the library enforces.
+
 ## Project Structure
 
 ```
@@ -49,6 +72,8 @@ go test -v -race ./...
 │   ├── realization/     # Materialization of views into target bundles
 │   ├── release/         # Named release promotion and rollback
 │   └── repo/            # Top-level facade composing all modules
+├── cmd/
+│   └── got/             # Command-line shell over the library (UC-U19)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml       # GitHub Actions CI pipeline
