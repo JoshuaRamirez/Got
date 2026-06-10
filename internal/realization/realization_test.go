@@ -161,6 +161,36 @@ func TestJSONManifestMaterialize(t *testing.T) {
 	}
 }
 
+// A materializer whose bundle declares provenance outside the view is
+// rejected per the UC-S14 fidelity axiom.
+func TestMaterializeRejectsProvenanceEscape(t *testing.T) {
+	ctx := context.Background()
+	a := vid("escape-a")
+	v := viewOver(t, a)
+
+	escaping := identity.VertexID(sha256.Sum256([]byte("not-in-view")))
+	e := realization.NewEngine()
+	e.Register("leaky", realization.MaterializerFunc(func(s graph.Subgraph) (realization.Bundle, error) {
+		return &escapingBundle{prov: escaping}, nil
+	}))
+	_, err := e.Materialize(ctx, v, "leaky")
+	if !errors.Is(err, realization.ErrTargetUnsupported) {
+		t.Fatalf("expected ErrTargetUnsupported wrap on provenance escape, got %v", err)
+	}
+}
+
+// escapingBundle deliberately emits a provenance ID that won't be in the view.
+type escapingBundle struct{ prov identity.VertexID }
+
+func (b *escapingBundle) Target() realization.Target { return "leaky" }
+func (b *escapingBundle) Paths() []string            { return []string{"escape"} }
+func (b *escapingBundle) Provenance(string) []identity.VertexID {
+	return []identity.VertexID{b.prov}
+}
+func (b *escapingBundle) Fidelity() realization.FidelityContract {
+	return realization.FidelityContract{Name: "leaky"}
+}
+
 // Failure: ctx cancelled.
 func TestMaterializeContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

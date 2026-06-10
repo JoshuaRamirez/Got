@@ -55,7 +55,14 @@ func (e *DefaultEngine) Register(t Target, m Materializer) {
 }
 
 // Materialize satisfies the Engine interface. It looks up the registered
-// Materializer for target and delegates.
+// Materializer for target and delegates. After the materializer returns,
+// it enforces the fidelity axiom from UC-S14:
+//
+//	∀ path ∈ Bundle.Paths(): Bundle.Provenance(path) ⊆ view.Subgraph().VertexIDs()
+//
+// A materializer that emits a path whose provenance escapes the view is
+// a contract violation; the offending bundle is discarded and an error
+// wrapping ErrTargetUnsupported is returned naming the path.
 func (e *DefaultEngine) Materialize(ctx context.Context, v projection.View, t Target) (Bundle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -64,7 +71,24 @@ func (e *DefaultEngine) Materialize(ctx context.Context, v projection.View, t Ta
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrTargetUnsupported, t)
 	}
-	return m.Materialize(v.Subgraph())
+	sub := v.Subgraph()
+	bundle, err := m.Materialize(sub)
+	if err != nil {
+		return nil, err
+	}
+	viewSet := make(map[identity.VertexID]bool, len(sub.VertexIDs()))
+	for _, id := range sub.VertexIDs() {
+		viewSet[id] = true
+	}
+	for _, path := range bundle.Paths() {
+		for _, prov := range bundle.Provenance(path) {
+			if !viewSet[prov] {
+				return nil, fmt.Errorf("realization: bundle path %q provenance %v escapes view: %w",
+					path, prov, ErrTargetUnsupported)
+			}
+		}
+	}
+	return bundle, nil
 }
 
 // jsonManifestMaterialize emits a single path "manifest.json" whose
