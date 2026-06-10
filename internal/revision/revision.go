@@ -39,6 +39,18 @@ var (
 	// pushout complement does not exist. Lenient mode silently drops
 	// such edges; Strict mode refuses the rewrite.
 	ErrDanglingEdge = errors.New("revision: dangling edge")
+
+	// ErrIdentityCollision indicates a Strict-mode rewrite would insert a
+	// produced (R-side) element whose caller-declared ID already binds
+	// structurally different content in the host graph. Content-addressed
+	// identity requires equal IDs to imply equal content, so the declared
+	// ID is not a faithful content address. Lenient mode silently
+	// overwrites the existing element (graph.WithVertex/WithEdge replace
+	// in place); Strict mode refuses the rewrite. This is the produce-side
+	// counterpart to ErrDanglingEdge's delete-side pushout-complement
+	// check — together they make a Strict rewrite a faithful DPO step
+	// rather than a "trust the caller's declared IDs" approximation.
+	ErrIdentityCollision = errors.New("revision: identity collision")
 )
 
 // TransformKind classifies the nature of a graph rewrite.
