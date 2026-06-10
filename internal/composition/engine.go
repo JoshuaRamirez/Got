@@ -45,24 +45,68 @@ type DefaultEngine struct {
 	governance   governance.Engine
 	verification verification.Engine
 	strictness   Strictness
+	attrsEqual   AttrsEqualFunc
+}
+
+// AttrsEqualFunc decides whether two Attrs values for the same key are
+// equivalent for merge purposes. Returns true when the values should be
+// treated as agreeing (no Textual conflict); false when they disagree.
+//
+// The default predicate (DefaultAttrsEqual) does bitwise `==` with a
+// recover/fmt.Sprint fallback for non-comparable types. Callers that
+// need semantic equivalence (canonical JSON, set equality on slices,
+// etc.) supply their own predicate via SetAttrsEqual.
+type AttrsEqualFunc func(a, b any) bool
+
+// DefaultAttrsEqual is the conservative default Attrs equivalence
+// predicate. Comparable values use `==`; non-comparable types fall back
+// to fmt.Sprint comparison. The recover wrapper makes the predicate
+// total (no panics on non-comparable maps or slices).
+func DefaultAttrsEqual(a, b any) bool {
+	return attrsEqual(a, b)
 }
 
 // NewEngine returns a default composition Engine wired to the supplied
-// governance and verification engines, configured for Lenient strictness.
+// governance and verification engines, configured for Lenient strictness
+// with the default Attrs equality predicate.
 func NewEngine(gov governance.Engine, ver verification.Engine) *DefaultEngine {
-	return &DefaultEngine{governance: gov, verification: ver, strictness: Lenient}
+	return &DefaultEngine{
+		governance:   gov,
+		verification: ver,
+		strictness:   Lenient,
+		attrsEqual:   DefaultAttrsEqual,
+	}
 }
 
 // NewEngineStrict returns a default composition Engine configured for
-// Strict strictness. Strict mode runs additional in-graph audits before
-// the governance gate; see Strictness documentation for what it covers
-// and what it does not.
+// Strict strictness with the default Attrs equality predicate. Strict
+// mode runs additional in-graph audits before the governance gate; see
+// Strictness documentation for what it covers and what it does not.
 func NewEngineStrict(gov governance.Engine, ver verification.Engine) *DefaultEngine {
-	return &DefaultEngine{governance: gov, verification: ver, strictness: Strict}
+	return &DefaultEngine{
+		governance:   gov,
+		verification: ver,
+		strictness:   Strict,
+		attrsEqual:   DefaultAttrsEqual,
+	}
 }
 
 // Strictness returns the configured strictness mode.
 func (e *DefaultEngine) Strictness() Strictness { return e.strictness }
+
+// SetAttrsEqual replaces the Attrs equivalence predicate used by the
+// per-side audit. A nil function resets to DefaultAttrsEqual.
+//
+// Typical use: a domain that stores JSON-shaped values in Attrs would
+// supply a canonical-JSON comparator so reordered-but-equivalent JSON
+// does not surface as a Textual conflict.
+func (e *DefaultEngine) SetAttrsEqual(f AttrsEqualFunc) {
+	if f == nil {
+		e.attrsEqual = DefaultAttrsEqual
+		return
+	}
+	e.attrsEqual = f
+}
 
 func (e *DefaultEngine) Merge(ctx context.Context, g graph.Graph, left, right projection.Frontier, ps []governance.Policy) (MergeResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -75,7 +119,7 @@ func (e *DefaultEngine) Merge(ctx context.Context, g graph.Graph, left, right pr
 	if e.strictness == Strict {
 		var conflicts []Conflict
 		conflicts = append(conflicts, strictAudit(g, union)...)
-		conflicts = append(conflicts, perSideAudit(left, right)...)
+		conflicts = append(conflicts, perSideAudit(left, right, e.attrsEqual)...)
 		if len(conflicts) > 0 {
 			return MergeResult{Conflicts: conflicts}, nil
 		}
@@ -190,10 +234,12 @@ func structuralAudit(g graph.Graph, idSet map[identity.VertexID]bool) []Conflict
 // present in only one side's edit map are not conflicts — they are
 // additions, which are the normal merge case.
 //
-// Equivalence is bitwise today. Future refinement (canonical JSON for
-// Attrs, interval intersection for Time) can be added per the open
-// decision in docs/devlog/2026-05-17.md.
-func perSideAudit(left, right projection.Frontier) []Conflict {
+// The eq predicate decides Attrs equivalence. Callers control it via
+// DefaultEngine.SetAttrsEqual; the default predicate is bitwise.
+func perSideAudit(left, right projection.Frontier, eq AttrsEqualFunc) []Conflict {
+	if eq == nil {
+		eq = DefaultAttrsEqual
+	}
 	leftE, lok := left.(projection.Edited)
 	rightE, rok := right.(projection.Edited)
 	if !lok || !rok {
@@ -239,7 +285,7 @@ func perSideAudit(left, right projection.Frontier) []Conflict {
 			})
 		}
 		for k, lval := range lv.Attrs {
-			if rval, ok := rv.Attrs[k]; ok && !attrsEqual(lval, rval) {
+			if rval, ok := rv.Attrs[k]; ok && !eq(lval, rval) {
 				conflicts = append(conflicts, auditConflict{
 					kind:     Textual,
 					boundary: []identity.VertexID{id},

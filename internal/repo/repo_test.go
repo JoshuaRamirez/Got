@@ -346,3 +346,44 @@ func TestIngestContextCancelled(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
+
+// ReviseWithCapsule returns the ChangeCapsule alongside the new state.
+// UC-U02 step 6 requires the system to emit a capsule recording
+// consumed and produced vertex IDs.
+func TestReviseWithCapsule(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	v := graph.Vertex{ID: vid("capsule-v"), Type: ontology.Revision}
+	out, capsule, err := svc.ReviseWithCapsule(ctx, state, addVertexRule{v: v}, emptyMatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out.Graph().Vertex(v.ID); !ok {
+		t.Fatal("revised graph should contain new vertex")
+	}
+	if len(capsule.Produced) != 1 || capsule.Produced[0] != v.ID {
+		t.Fatalf("capsule.Produced = %v, want [%v]", capsule.Produced, v.ID)
+	}
+	if len(capsule.Consumed) != 0 {
+		t.Fatalf("capsule.Consumed should be empty for pure addition, got %v", capsule.Consumed)
+	}
+}
+
+// Revise (without capsule) still works — delegates to ReviseWithCapsule
+// and discards the capsule.
+func TestReviseDelegatesToReviseWithCapsule(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	v := graph.Vertex{ID: vid("delegate-v"), Type: ontology.Revision}
+	out, err := svc.Revise(ctx, state, addVertexRule{v: v}, emptyMatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out.Graph().Vertex(v.ID); !ok {
+		t.Fatal("revised graph should contain new vertex via Revise delegation")
+	}
+}

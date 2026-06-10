@@ -128,14 +128,29 @@ func (s *DefaultService) Ingest(ctx context.Context, state State, p Payload) (St
 	return defaultStateWith(state, g), nil
 }
 
-// Revise applies a DPO rewrite to the graph.
+// Revise applies a DPO rewrite to the graph and discards the audit
+// capsule. Callers that need the ChangeCapsule should use
+// ReviseWithCapsule instead.
 func (s *DefaultService) Revise(ctx context.Context, state State, r revision.Rule, m revision.Match) (State, error) {
+	newState, _, err := s.ReviseWithCapsule(ctx, state, r, m)
+	return newState, err
+}
+
+// ReviseWithCapsule applies a DPO rewrite and returns the audit
+// ChangeCapsule alongside the new state. Per UC-U02 step 6, every
+// revision emits a capsule recording consumed and produced vertex IDs
+// plus actor/environment/policies metadata. Replay (UC-U14) consumes
+// the capsule.
+//
+// Revise (which discards the capsule) remains for callers that don't
+// need the audit trail; it delegates to this method.
+func (s *DefaultService) ReviseWithCapsule(ctx context.Context, state State, r revision.Rule, m revision.Match) (State, revision.ChangeCapsule, error) {
 	g := state.Graph()
-	newG, _, err := s.revision.Apply(ctx, g, r, m)
+	newG, capsule, err := s.revision.Apply(ctx, g, r, m)
 	if err != nil {
-		return nil, err
+		return nil, revision.ChangeCapsule{}, err
 	}
-	return defaultStateWith(state, newG), nil
+	return defaultStateWith(state, newG), capsule, nil
 }
 
 // Branch binds a name to a vertex.
