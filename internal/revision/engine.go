@@ -3,6 +3,7 @@ package revision
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
@@ -40,6 +41,13 @@ const (
 // This is a literal "delete what's in L\K, keep what's in K, add what's in
 // R\K" interpretation. It does not attempt to compute the pushout complement
 // from scratch; the Rule pre-declares the consumed and produced subsets.
+//
+// Strict mode adds two faithfulness audits the Lenient impl skips:
+//   - delete side: dangling-edge detection (the pushout complement must
+//     exist) — see ErrDanglingEdge.
+//   - produce side: content-addressing check — a produced element's
+//     caller-declared ID may not collide with structurally different host
+//     content — see ErrIdentityCollision.
 type dpoEngine struct {
 	strictness Strictness
 }
@@ -124,6 +132,13 @@ func (e dpoEngine) Apply(ctx context.Context, g graph.Graph, r Rule, m Match) (g
 	newGraph, err := rebuildWithout(g, deleteSet, deleteEdges)
 	if err != nil {
 		return nil, ChangeCapsule{}, err
+	}
+
+	if e.strictness == Strict {
+		if cols := contentCollisions(newGraph, right, contextIDs, contextEdges); len(cols) > 0 {
+			return nil, ChangeCapsule{}, fmt.Errorf("%w: %d produced element(s) collide with different host content",
+				ErrIdentityCollision, len(cols))
+		}
 	}
 
 	var produced []identity.VertexID
@@ -298,4 +313,85 @@ func danglingEdges(g graph.Graph, deleteVerts map[identity.VertexID]bool, delete
 		}
 	}
 	return danglers
+}
+
+// Collision identifies one produced (R-side) element whose caller-declared
+// ID already binds structurally different content in the post-deletion
+// graph. VertexID is non-zero for a vertex collision; EdgeID is non-zero
+// for an edge collision. Exactly one is set.
+type Collision struct {
+	VertexID identity.VertexID
+	EdgeID   identity.EdgeID
+}
+
+// contentCollisions returns the produced (non-context) vertices and edges in
+// `right` whose IDs already exist in `post` (the host graph after deletions)
+// bound to structurally different content. These are exactly the insertions
+// where graph.WithVertex / graph.WithEdge would silently overwrite an
+// existing element with a different value — a content-addressing violation,
+// because equal IDs must imply equal content.
+//
+// Context (K-side) elements are excluded: they are the preserved interface
+// and are expected to already exist with matching content. Produced elements
+// that re-state existing identical content are not collisions (the rewrite is
+// idempotent on them). Genuinely new IDs are not collisions.
+//
+// Hyperedges are not audited because the current Apply does not insert R-side
+// hyperedges (see the insertion loops in Apply); there is no overwrite to
+// guard against.
+func contentCollisions(post graph.Graph, right graph.Subgraph, contextVerts map[identity.VertexID]bool, contextEdges map[identity.EdgeID]bool) []Collision {
+	var collisions []Collision
+
+	for _, v := range right.Vertices() {
+		if contextVerts[v.ID] {
+			continue
+		}
+		if existing, ok := post.Vertex(v.ID); ok && !vertexContentEqual(existing, v) {
+			collisions = append(collisions, Collision{VertexID: v.ID})
+		}
+	}
+
+	for _, e := range right.Edges() {
+		if contextEdges[e.ID] {
+			continue
+		}
+		if existing, ok := post.Edge(e.ID); ok && !edgeContentEqual(existing, e) {
+			collisions = append(collisions, Collision{EdgeID: e.ID})
+		}
+	}
+
+	return collisions
+}
+
+// vertexContentEqual reports whether two vertices with the same ID carry the
+// same content: type, temporal triple, trust annotation, and attributes.
+func vertexContentEqual(a, b graph.Vertex) bool {
+	return a.Type == b.Type &&
+		a.Time == b.Time &&
+		a.Trust == b.Trust &&
+		attrMapEqual(a.Attrs, b.Attrs)
+}
+
+// edgeContentEqual reports whether two edges with the same ID carry the same
+// content: type, endpoints, and attributes.
+func edgeContentEqual(a, b graph.Edge) bool {
+	return a.Type == b.Type &&
+		a.From == b.From &&
+		a.To == b.To &&
+		attrMapEqual(a.Attrs, b.Attrs)
+}
+
+// attrMapEqual compares two attribute maps by deep equality, treating a nil
+// map and an empty map as equal.
+func attrMapEqual(a, b graph.AttrMap) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok || !reflect.DeepEqual(av, bv) {
+			return false
+		}
+	}
+	return true
 }

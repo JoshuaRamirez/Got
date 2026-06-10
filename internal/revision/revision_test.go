@@ -459,3 +459,167 @@ func TestErrDanglingEdgeSentinel(t *testing.T) {
 		t.Fatal("ErrDanglingEdge must match itself")
 	}
 }
+
+// --- Strict mode (content-addressing / identity-collision detection) ---
+
+// Lenient mode silently overwrites an existing vertex when a produced R-side
+// vertex declares the same ID with different content (graph.WithVertex
+// replaces in place).
+func TestApplyLenientOverwritesOnIdentityCollision(t *testing.T) {
+	ctx := context.Background()
+	x := vid("collide-x")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: x, Type: ontology.Artifact})
+
+	// R produces x again but as a Model — same ID, different content.
+	clobber := graph.Vertex{ID: x, Type: ontology.Model}
+	rule := testRule{
+		left:  &inlineSubgraph{},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{ids: []identity.VertexID{x}, verts: []graph.Vertex{clobber}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	e := revision.NewEngine() // Lenient
+	g2, _, err := e.Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := g2.Vertex(x)
+	if !ok {
+		t.Fatal("vertex x should still be present")
+	}
+	if got.Type != ontology.Model {
+		t.Fatalf("Lenient should have overwritten x with the produced content; type = %q", got.Type)
+	}
+}
+
+// Strict mode refuses the rewrite when a produced vertex declares an existing
+// ID with different content.
+func TestApplyStrictRefusesVertexIdentityCollision(t *testing.T) {
+	ctx := context.Background()
+	x := vid("collide-refuse-x")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: x, Type: ontology.Artifact})
+
+	clobber := graph.Vertex{ID: x, Type: ontology.Model}
+	rule := testRule{
+		left:  &inlineSubgraph{},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{ids: []identity.VertexID{x}, verts: []graph.Vertex{clobber}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	e := revision.NewEngineStrict()
+	_, _, err := e.Apply(ctx, g, rule, match)
+	if !errors.Is(err, revision.ErrIdentityCollision) {
+		t.Fatalf("expected ErrIdentityCollision, got %v", err)
+	}
+	// Input graph is unchanged.
+	if v, _ := g.Vertex(x); v.Type != ontology.Artifact {
+		t.Fatal("input graph must be unchanged after a refused rewrite")
+	}
+}
+
+// Strict mode refuses the rewrite when a produced edge declares an existing
+// edge ID with different content (different type on the same endpoints).
+func TestApplyStrictRefusesEdgeIdentityCollision(t *testing.T) {
+	ctx := context.Background()
+	exec := vid("collide-exec")
+	model := vid("collide-model")
+	tool := vid("collide-tool")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: exec, Type: ontology.Execution})
+	g, _ = g.WithVertex(graph.Vertex{ID: model, Type: ontology.Model})
+	g, _ = g.WithVertex(graph.Vertex{ID: tool, Type: ontology.Tool})
+	// Existing edge: exec -executes-> model, with a chosen ID.
+	collideEdge := eid("collide-e")
+	g, _ = g.WithEdge(graph.Edge{ID: collideEdge, Type: ontology.Executes, From: exec, To: model})
+
+	verts := []graph.Vertex{
+		{ID: exec, Type: ontology.Execution},
+		{ID: tool, Type: ontology.Tool},
+	}
+	// R re-uses the same edge ID but points exec -> tool (different content).
+	clobber := graph.Edge{ID: collideEdge, Type: ontology.Executes, From: exec, To: tool}
+	rule := testRule{
+		left:  &inlineSubgraph{ids: []identity.VertexID{exec, tool}, verts: verts},
+		ctx:   &inlineSubgraph{ids: []identity.VertexID{exec, tool}, verts: verts},
+		right: &inlineSubgraph{ids: []identity.VertexID{exec, tool}, verts: verts, edges: []graph.Edge{clobber}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{exec: exec, tool: tool}}
+
+	e := revision.NewEngineStrict()
+	_, _, err := e.Apply(ctx, g, rule, match)
+	if !errors.Is(err, revision.ErrIdentityCollision) {
+		t.Fatalf("expected ErrIdentityCollision for edge collision, got %v", err)
+	}
+}
+
+// Strict mode allows an idempotent re-statement: a produced vertex that
+// declares an existing ID with identical content is not a collision.
+func TestApplyStrictAllowsIdempotentRestatement(t *testing.T) {
+	ctx := context.Background()
+	a := vid("idem-a")
+	b := vid("idem-b")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: a, Type: ontology.Execution})
+	g, _ = g.WithVertex(graph.Vertex{ID: b, Type: ontology.Model})
+
+	verts := []graph.Vertex{
+		{ID: a, Type: ontology.Execution},
+		{ID: b, Type: ontology.Model},
+	}
+	// R re-states a and b with identical content and adds an admissible edge.
+	newEdge := graph.Edge{ID: eid("idem-e"), Type: ontology.Executes, From: a, To: b}
+	rule := testRule{
+		left:  &inlineSubgraph{ids: []identity.VertexID{a, b}, verts: verts},
+		ctx:   &inlineSubgraph{ids: []identity.VertexID{a, b}, verts: verts},
+		right: &inlineSubgraph{ids: []identity.VertexID{a, b}, verts: verts, edges: []graph.Edge{newEdge}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{a: a, b: b}}
+
+	e := revision.NewEngineStrict()
+	g2, _, err := e.Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatalf("idempotent re-statement should be allowed in Strict mode, got %v", err)
+	}
+	if _, ok := g2.Edge(newEdge.ID); !ok {
+		t.Fatal("expected the new edge to be inserted")
+	}
+}
+
+// Strict mode allows producing a vertex whose ID was consumed (deleted) in the
+// same rewrite, even with different content — that is a legitimate
+// delete-then-add, not an overwrite.
+func TestApplyStrictAllowsReplaceAfterDelete(t *testing.T) {
+	ctx := context.Background()
+	x := vid("replace-x")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: x, Type: ontology.Artifact})
+
+	// L deletes x (Artifact); R produces x as a Model. Because x is removed
+	// before insertion, this is not a collision in the post-deletion graph.
+	rule := testRule{
+		left:  &inlineSubgraph{ids: []identity.VertexID{x}, verts: []graph.Vertex{{ID: x, Type: ontology.Artifact}}},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{ids: []identity.VertexID{x}, verts: []graph.Vertex{{ID: x, Type: ontology.Model}}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{x: x}}
+
+	e := revision.NewEngineStrict()
+	g2, _, err := e.Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatalf("delete-then-add of the same ID should be allowed, got %v", err)
+	}
+	got, ok := g2.Vertex(x)
+	if !ok || got.Type != ontology.Model {
+		t.Fatalf("expected x to be replaced with the Model content; got %+v ok=%v", got, ok)
+	}
+}
+
+func TestErrIdentityCollisionSentinel(t *testing.T) {
+	if !errors.Is(revision.ErrIdentityCollision, revision.ErrIdentityCollision) {
+		t.Fatal("ErrIdentityCollision must match itself")
+	}
+}
