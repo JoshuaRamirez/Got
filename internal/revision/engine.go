@@ -8,6 +8,23 @@ import (
 	"github.com/joshuaramirez/got/internal/identity"
 )
 
+// Strictness controls whether revision.Apply refuses rewrites that
+// would silently drop dangling edges. Mirrors the composition bridge's
+// Strictness flag.
+type Strictness int
+
+const (
+	// Lenient is the historical behavior: edges incident to deleted
+	// vertices are silently dropped (rebuildWithout skips them).
+	Lenient Strictness = iota
+
+	// Strict refuses any rewrite that would leave a host-graph edge
+	// orphaned by deletion. Categorically: the pushout complement
+	// does not exist when the rule deletes a vertex whose remaining
+	// incident edges aren't also in L\K. Returns ErrDanglingEdge.
+	Strict
+)
+
 // dpoEngine implements a Double-Pushout (DPO) rewrite over the hypergraph.
 //
 // Conventions used here:
@@ -23,14 +40,27 @@ import (
 // This is a literal "delete what's in L\K, keep what's in K, add what's in
 // R\K" interpretation. It does not attempt to compute the pushout complement
 // from scratch; the Rule pre-declares the consumed and produced subsets.
-type dpoEngine struct{}
-
-// NewEngine returns a default DPO rewrite engine.
-func NewEngine() Engine {
-	return dpoEngine{}
+type dpoEngine struct {
+	strictness Strictness
 }
 
-func (dpoEngine) Apply(ctx context.Context, g graph.Graph, r Rule, m Match) (graph.Graph, ChangeCapsule, error) {
+// NewEngine returns a default DPO rewrite engine in Lenient mode.
+func NewEngine() Engine {
+	return dpoEngine{strictness: Lenient}
+}
+
+// NewEngineStrict returns a DPO rewrite engine in Strict mode. Strict
+// refuses rewrites that would leave dangling edges, returning
+// ErrDanglingEdge. Use this when silent edge-drop is a correctness
+// concern.
+func NewEngineStrict() Engine {
+	return dpoEngine{strictness: Strict}
+}
+
+// Strictness returns the configured strictness mode.
+func (e dpoEngine) Strictness() Strictness { return e.strictness }
+
+func (e dpoEngine) Apply(ctx context.Context, g graph.Graph, r Rule, m Match) (graph.Graph, ChangeCapsule, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, ChangeCapsule{}, err
 	}
@@ -81,6 +111,13 @@ func (dpoEngine) Apply(ctx context.Context, g graph.Graph, r Rule, m Match) (gra
 	for eid := range leftEdges {
 		if !contextEdges[eid] {
 			deleteEdges[eid] = true
+		}
+	}
+
+	if e.strictness == Strict {
+		if danglers := danglingEdges(g, deleteSet, deleteEdges); len(danglers) > 0 {
+			return nil, ChangeCapsule{}, fmt.Errorf("%w: %d edge(s)/hyperedge(s) would be orphaned by deletion",
+				ErrDanglingEdge, len(danglers))
 		}
 	}
 
@@ -212,4 +249,53 @@ func edgeIDSet(edges []graph.Edge) map[identity.EdgeID]bool {
 		s[e.ID] = true
 	}
 	return s
+}
+
+// Dangler identifies one orphaned edge or hyperedge that would be
+// produced by a rewrite. EdgeID is non-zero for edge orphans;
+// HyperedgeID is non-zero for hyperedge orphans. Exactly one is set.
+type Dangler struct {
+	EdgeID      identity.EdgeID
+	HyperedgeID identity.HyperedgeID
+}
+
+// danglingEdges returns IDs in g that touch a deleted vertex but are
+// not themselves slated for deletion. These are the edges/hyperedges
+// that Lenient mode would silently drop; Strict mode refuses the
+// rewrite when any such item exists. Categorically, the pushout
+// complement of l along m does not exist when this set is non-empty.
+func danglingEdges(g graph.Graph, deleteVerts map[identity.VertexID]bool, deleteEdges map[identity.EdgeID]bool) []Dangler {
+	if len(deleteVerts) == 0 {
+		return nil
+	}
+	var danglers []Dangler
+	for _, e := range g.Edges() {
+		if deleteEdges[e.ID] {
+			continue
+		}
+		if deleteVerts[e.From] || deleteVerts[e.To] {
+			danglers = append(danglers, Dangler{EdgeID: e.ID})
+		}
+	}
+	for _, h := range g.Hyperedges() {
+		orphaned := false
+		for _, vid := range h.Inputs {
+			if deleteVerts[vid] {
+				orphaned = true
+				break
+			}
+		}
+		if !orphaned {
+			for _, vid := range h.Outputs {
+				if deleteVerts[vid] {
+					orphaned = true
+					break
+				}
+			}
+		}
+		if orphaned {
+			danglers = append(danglers, Dangler{HyperedgeID: h.ID})
+		}
+	}
+	return danglers
 }
