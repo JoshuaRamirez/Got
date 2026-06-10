@@ -158,8 +158,10 @@ and exercised by at least one system use case (fish level,
 `Verified` (implementation + behavioral tests). The roadmap at
 `docs/requirements/use-cases/roadmap.md` orders the dependency layers.
 
-As of `aa23eaf` and through the hardening passes, all 37 UCs read
-`Verified`.
+As of the hardening passes, all 38 UCs read `Verified`. UC-U18
+(three-way merge) is the most recent, added as an additive
+`composition.DefaultEngine.MergeThreeWay` capability (the optional
+`ThreeWayMerger` interface) without changing the core `Engine` contract.
 
 ## Spec / impl divergence
 
