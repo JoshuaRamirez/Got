@@ -197,20 +197,33 @@ func (r preferLeftAttrResolver) Apply(_ context.Context, g graph.Graph, c Confli
 // PreferHigherTrust resolves a Trust conflict by keeping the
 // higher-Score TrustAnnotation on both sides. Ties go to Left.
 func PreferHigherTrust() Resolver {
-	return preferHigherTrustResolver{}
+	return preferTrustResolver{higher: true}
 }
 
-type preferHigherTrustResolver struct{}
+// PreferLowerTrust is the mirror of PreferHigherTrust — keeps the
+// lower-Score TrustAnnotation. Useful when "least privilege" is the
+// merge policy. Ties go to Left.
+func PreferLowerTrust() Resolver {
+	return preferTrustResolver{higher: false}
+}
 
-func (preferHigherTrustResolver) AppliesTo() ConflictKind { return Trust }
-func (preferHigherTrustResolver) Apply(_ context.Context, g graph.Graph, c Conflict, left, right *projection.EditedFrontier) (graph.Graph, error) {
+type preferTrustResolver struct{ higher bool }
+
+func (preferTrustResolver) AppliesTo() ConflictKind { return Trust }
+func (r preferTrustResolver) Apply(_ context.Context, g graph.Graph, c Conflict, left, right *projection.EditedFrontier) (graph.Graph, error) {
 	p, ok := payloadOf[TrustPayload](c)
 	if !ok {
 		return g, nil
 	}
 	chosen := p.Left
-	if p.Right.Score > p.Left.Score {
-		chosen = p.Right
+	if r.higher {
+		if p.Right.Score > p.Left.Score {
+			chosen = p.Right
+		}
+	} else {
+		if p.Right.Score < p.Left.Score {
+			chosen = p.Right
+		}
 	}
 	if left != nil {
 		if v, ok := left.Vertices[p.Vertex]; ok {
@@ -229,6 +242,110 @@ func (preferHigherTrustResolver) Apply(_ context.Context, g graph.Graph, c Confl
 		return g.WithVertex(v)
 	}
 	return g, nil
+}
+
+// PreferRightAttr is the mirror of PreferLeftAttr — copies the right
+// value onto the left side and the graph for the named attr key.
+func PreferRightAttr(key string) Resolver {
+	return preferRightAttrResolver{key: key}
+}
+
+type preferRightAttrResolver struct{ key string }
+
+func (preferRightAttrResolver) AppliesTo() ConflictKind { return Textual }
+func (r preferRightAttrResolver) Apply(_ context.Context, g graph.Graph, c Conflict, left, right *projection.EditedFrontier) (graph.Graph, error) {
+	p, ok := payloadOf[TextualPayload](c)
+	if !ok || p.Key != r.key {
+		return g, nil
+	}
+	if left != nil {
+		lv, ok := left.Vertices[p.Vertex]
+		if ok {
+			if lv.Attrs == nil {
+				lv.Attrs = make(graph.AttrMap, 1)
+			}
+			lv.Attrs[r.key] = p.Right
+			left.Vertices[p.Vertex] = lv
+		}
+	}
+	if v, vok := g.Vertex(p.Vertex); vok {
+		if v.Attrs == nil {
+			v.Attrs = make(graph.AttrMap, 1)
+		}
+		v.Attrs[r.key] = p.Right
+		return g.WithVertex(v)
+	}
+	return g, nil
+}
+
+// PreferEarlierTime resolves a Temporal conflict by keeping the earlier
+// ValidFrom on both sides. Ties go to Left.
+func PreferEarlierTime() Resolver {
+	return preferTimeResolver{earlier: true}
+}
+
+// PreferLaterTime is the mirror of PreferEarlierTime — keeps the later
+// ValidFrom on both sides. Ties go to Left.
+func PreferLaterTime() Resolver {
+	return preferTimeResolver{earlier: false}
+}
+
+type preferTimeResolver struct{ earlier bool }
+
+func (preferTimeResolver) AppliesTo() ConflictKind { return Temporal }
+func (r preferTimeResolver) Apply(_ context.Context, g graph.Graph, c Conflict, left, right *projection.EditedFrontier) (graph.Graph, error) {
+	p, ok := payloadOf[TemporalPayload](c)
+	if !ok {
+		return g, nil
+	}
+	chosen := p.Left
+	if r.earlier {
+		if p.Right.ValidFrom < p.Left.ValidFrom {
+			chosen = p.Right
+		}
+	} else {
+		if p.Right.ValidFrom > p.Left.ValidFrom {
+			chosen = p.Right
+		}
+	}
+	if left != nil {
+		if v, ok := left.Vertices[p.Vertex]; ok {
+			v.Time = chosen
+			left.Vertices[p.Vertex] = v
+		}
+	}
+	if right != nil {
+		if v, ok := right.Vertices[p.Vertex]; ok {
+			v.Time = chosen
+			right.Vertices[p.Vertex] = v
+		}
+	}
+	if v, vok := g.Vertex(p.Vertex); vok {
+		v.Time = chosen
+		return g.WithVertex(v)
+	}
+	return g, nil
+}
+
+// RejectSchemaConflict is a resolver that does NOT auto-resolve Schema
+// conflicts — Type changes are semantically dangerous and usually
+// require human review. Instead, it returns an error so ResolveTyped
+// reports ErrConflictUnresolvable up the stack. Use this when callers
+// want Schema conflicts to fail loudly rather than persist as
+// unresolved noise in the re-merge.
+func RejectSchemaConflict() Resolver {
+	return rejectSchemaResolver{}
+}
+
+type rejectSchemaResolver struct{}
+
+func (rejectSchemaResolver) AppliesTo() ConflictKind { return Schema }
+func (rejectSchemaResolver) Apply(_ context.Context, g graph.Graph, c Conflict, _, _ *projection.EditedFrontier) (graph.Graph, error) {
+	if p, ok := payloadOf[SchemaPayload](c); ok {
+		return g, fmt.Errorf("schema disagreement on %v: %q vs %q (no auto-resolution)",
+			p.Vertex, p.LeftType, p.RightType)
+	}
+	return g, fmt.Errorf("schema conflict (no payload available)")
 }
 
 // payloadOf is a small generic helper for type-asserting a Payloaded
