@@ -128,6 +128,18 @@ The dependency graph is a strict DAG.
   composition; Evaluate to verification; Materialize chains
   projection→realization; Release to governance.
 
+### Layer 5 — application
+
+- **`cmd/got`** — a command-line shell over the library (UC-U19). It is
+  the first executable; everything below is a library. It persists a
+  single JSON state file under `$GOT_DIR` (default `.got`) and rebuilds
+  the graph + namespace from it on each invocation, then drives the
+  library: `add-vertex`/`add-edge` → `repo.Ingest`, `bind` →
+  `repo.Branch`, `resolve` → `namespace.ResolveRef`, `trace`/`cone` →
+  `provenance.Engine`. A vertex's `VertexID` is `sha256(name)`, matching
+  the convention used throughout the tests. `run(args, stdout, stderr)`
+  is the testable entry point.
+
 ## Key design rules
 
 The rules of record are in `docs/design-rules.md`. The three that show
@@ -158,10 +170,11 @@ and exercised by at least one system use case (fish level,
 `Verified` (implementation + behavioral tests). The roadmap at
 `docs/requirements/use-cases/roadmap.md` orders the dependency layers.
 
-As of the hardening passes, all 38 UCs read `Verified`. UC-U18
-(three-way merge) is the most recent, added as an additive
-`composition.DefaultEngine.MergeThreeWay` capability (the optional
-`ThreeWayMerger` interface) without changing the core `Engine` contract.
+As of the hardening passes, all 39 UCs read `Verified`. The two most
+recent are UC-U18 (three-way merge, an additive
+`composition.DefaultEngine.MergeThreeWay` capability via the optional
+`ThreeWayMerger` interface) and UC-U19 (the `cmd/got` command-line
+shell, the system's first executable).
 
 ## Spec / impl divergence
 

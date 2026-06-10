@@ -54,6 +54,7 @@ When a UC is retired:
 | [UC-U16](user/UC-U16-detect-emergent-capability.md) | Detect an emergent capability | Verified | `internal/capability/engine.go` (`Emerges`) | `internal/capability/capability_test.go` | 2026-05-05 | Predicate-list dispatch; first-match wins; built-in `CertifiedNonEmpty` predicate; ErrNoEmergence failure path covered. |
 | [UC-U17](user/UC-U17-resolve-merge-conflicts.md) | Resolve merge conflicts | Verified | `internal/composition/engine.go` (`Resolve`), reachable via `repo.Service.Merge` then re-call | `internal/composition/composition_test.go` | 2026-05-05 | Composition.Resolve verified; UC-U17 main path "actor invokes composition.Engine.Resolve" is fully covered via the composition behavioral test. |
 | [UC-U18](user/UC-U18-three-way-merge.md) | Three-way merge against a common ancestor | Verified | `internal/composition/threeway.go` (`DefaultEngine.MergeThreeWay`, `ThreeWayMerger`) | `internal/composition/threeway_test.go` | 2026-06-10 | Additive concrete method (no Engine interface change). Ancestor-relative reconciliation: only-left/only-right/agreed change, add, honored deletion, both-delete success paths; modify/modify, add/add, modify/delete, schema, and Unsat-policy conflict paths; plain-frontier presence-only degradation; ctx cancellation. Content via projection.Edited. |
+| [UC-U19](user/UC-U19-operate-from-cli.md) | Operate the repository from the command line | Verified | `cmd/got` (`run.go`, `store.go`, `helpers.go`) | `cmd/got/run_test.go` | 2026-06-10 | CLI shell over the library with JSON persistence under $GOT_DIR. init/add-vertex/add-edge/bind/resolve/list/trace/cone commands drive repo.Ingest, repo.Branch, namespace.ResolveRef, and provenance.Engine. Tests cover happy paths plus unknown-command, before-init, unknown-type, duplicate, inadmissible-edge (state unchanged), missing-endpoint, bind-unknown, resolve-unbound, unconnected-trace, and cross-invocation persistence. New delivery channel for UC-U01/U03/U09/U10/U11/S08 — no new engine behavior. |
 
 ## System use cases
 
@@ -86,13 +87,13 @@ As of 2026-06-10:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 18 | 0 | 18 |
+| User | 0 | 0 | 0 | 19 | 0 | 19 |
 | System | 0 | 0 | 0 | 20 | 0 | 20 |
-| **Total** | **0** | **0** | **0** | **38** | **0** | **38** |
+| **Total** | **0** | **0** | **0** | **39** | **0** | **39** |
 
-**Verified coverage: 38 / 38 = 100%.** UC-U18 (three-way merge) added
-2026-06-10 as an additive capability on `composition.DefaultEngine`. All
-roadmap phases complete (see `roadmap.md`). Every public method on every internal `Engine` and
+**Verified coverage: 39 / 39 = 100%.** UC-U18 (three-way merge) and
+UC-U19 (command-line operation, the `cmd/got` shell) added 2026-06-10.
+All roadmap phases complete (see `roadmap.md`). Every public method on every internal `Engine` and
 `Service` is reachable from at least one user use case and exercised by
 at least one system use case, with behavioral tests covering the main
 success path and at least one failure path per extension group.

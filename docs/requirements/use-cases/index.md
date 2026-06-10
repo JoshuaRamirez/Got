@@ -25,6 +25,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U16](user/UC-U16-detect-emergent-capability.md) | Detect an emergent capability | Capability monitor | `capability.Engine` |
 | [UC-U17](user/UC-U17-resolve-merge-conflicts.md) | Resolve merge conflicts | Integrator | `repo.Service`, `composition.Engine` |
 | [UC-U18](user/UC-U18-three-way-merge.md) | Three-way merge against a common ancestor | Integrator | `composition.Engine` |
+| [UC-U19](user/UC-U19-operate-from-cli.md) | Operate the repository from the command line | Operator | `cmd/got` |
 
 ## System use cases (sub-function level)
 
