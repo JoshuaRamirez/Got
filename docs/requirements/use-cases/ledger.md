@@ -53,6 +53,7 @@ When a UC is retired:
 | [UC-U15](user/UC-U15-prove-claim.md) | Prove a claim with a proof | Verified | `internal/verification/engine.go` (`Prove`) | `internal/verification/verification_test.go` | 2026-05-05 | Proves edge → true, no-edge → false, vertex-not-found failure path covered. |
 | [UC-U16](user/UC-U16-detect-emergent-capability.md) | Detect an emergent capability | Verified | `internal/capability/engine.go` (`Emerges`) | `internal/capability/capability_test.go` | 2026-05-05 | Predicate-list dispatch; first-match wins; built-in `CertifiedNonEmpty` predicate; ErrNoEmergence failure path covered. |
 | [UC-U17](user/UC-U17-resolve-merge-conflicts.md) | Resolve merge conflicts | Verified | `internal/composition/engine.go` (`Resolve`), reachable via `repo.Service.Merge` then re-call | `internal/composition/composition_test.go` | 2026-05-05 | Composition.Resolve verified; UC-U17 main path "actor invokes composition.Engine.Resolve" is fully covered via the composition behavioral test. |
+| [UC-U18](user/UC-U18-three-way-merge.md) | Three-way merge against a common ancestor | Verified | `internal/composition/threeway.go` (`DefaultEngine.MergeThreeWay`, `ThreeWayMerger`) | `internal/composition/threeway_test.go` | 2026-06-10 | Additive concrete method (no Engine interface change). Ancestor-relative reconciliation: only-left/only-right/agreed change, add, honored deletion, both-delete success paths; modify/modify, add/add, modify/delete, schema, and Unsat-policy conflict paths; plain-frontier presence-only degradation; ctx cancellation. Content via projection.Edited. |
 
 ## System use cases
 
@@ -81,16 +82,17 @@ When a UC is retired:
 
 ## Summary
 
-As of 2026-05-05:
+As of 2026-06-10:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 17 | 0 | 17 |
+| User | 0 | 0 | 0 | 18 | 0 | 18 |
 | System | 0 | 0 | 0 | 20 | 0 | 20 |
-| **Total** | **0** | **0** | **0** | **37** | **0** | **37** |
+| **Total** | **0** | **0** | **0** | **38** | **0** | **38** |
 
-**Verified coverage: 37 / 37 = 100%.** All phases complete (see
-`roadmap.md`). Every public method on every internal `Engine` and
+**Verified coverage: 38 / 38 = 100%.** UC-U18 (three-way merge) added
+2026-06-10 as an additive capability on `composition.DefaultEngine`. All
+roadmap phases complete (see `roadmap.md`). Every public method on every internal `Engine` and
 `Service` is reachable from at least one user use case and exercised by
 at least one system use case, with behavioral tests covering the main
 success path and at least one failure path per extension group.
