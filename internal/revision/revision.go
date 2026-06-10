@@ -32,6 +32,13 @@ var (
 	// ErrNoMatch indicates a Rule could not be applied because the match did
 	// not embed into the host graph.
 	ErrNoMatch = errors.New("revision: no valid match")
+
+	// ErrDanglingEdge indicates a Strict-mode rewrite would orphan one
+	// or more edges by deleting a vertex while leaving an edge whose
+	// other endpoint is outside L\K. In categorical DPO terms, the
+	// pushout complement does not exist. Lenient mode silently drops
+	// such edges; Strict mode refuses the rewrite.
+	ErrDanglingEdge = errors.New("revision: dangling edge")
 )
 
 // TransformKind classifies the nature of a graph rewrite.

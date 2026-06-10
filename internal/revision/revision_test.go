@@ -329,3 +329,133 @@ func TestReplayableEmptyCapsule(t *testing.T) {
 		t.Fatalf("empty capsule should be replayable, got %v", err)
 	}
 }
+
+// --- Strict mode (dangling-edge detection) ---
+
+// Lenient mode (default) silently drops orphaned edges when a vertex is
+// deleted; the rewrite succeeds.
+func TestApplyLenientDropsDanglingEdges(t *testing.T) {
+	ctx := context.Background()
+	x := vid("strict-x")
+	y := vid("strict-y")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: x, Type: ontology.Artifact})
+	g, _ = g.WithVertex(graph.Vertex{ID: y, Type: ontology.Revision})
+	g, _ = g.WithEdge(graph.Edge{ID: eid("strict-e"), Type: ontology.DerivedFrom, From: y, To: x})
+
+	// Delete x; the edge y->x becomes dangling.
+	rule := testRule{
+		left:  &inlineSubgraph{ids: []identity.VertexID{x}, verts: []graph.Vertex{{ID: x, Type: ontology.Artifact}}},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{x: x}}
+
+	e := revision.NewEngine() // Lenient
+	g2, _, err := e.Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g2.Edge(eid("strict-e")); ok {
+		t.Fatal("Lenient should silently drop the dangling edge")
+	}
+}
+
+// Strict mode refuses the rewrite when a deletion would orphan an edge.
+func TestApplyStrictRefusesDanglingEdge(t *testing.T) {
+	ctx := context.Background()
+	x := vid("strict-refuse-x")
+	y := vid("strict-refuse-y")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: x, Type: ontology.Artifact})
+	g, _ = g.WithVertex(graph.Vertex{ID: y, Type: ontology.Revision})
+	g, _ = g.WithEdge(graph.Edge{ID: eid("strict-refuse-e"), Type: ontology.DerivedFrom, From: y, To: x})
+
+	rule := testRule{
+		left:  &inlineSubgraph{ids: []identity.VertexID{x}, verts: []graph.Vertex{{ID: x, Type: ontology.Artifact}}},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{x: x}}
+
+	e := revision.NewEngineStrict()
+	_, _, err := e.Apply(ctx, g, rule, match)
+	if !errors.Is(err, revision.ErrDanglingEdge) {
+		t.Fatalf("expected ErrDanglingEdge, got %v", err)
+	}
+}
+
+// Strict mode allows the rewrite when no dangling edge would result
+// (deletion is "clean" — all incident edges are also in L\K).
+func TestApplyStrictAllowsCleanDeletion(t *testing.T) {
+	ctx := context.Background()
+	x := vid("strict-clean-x")
+	y := vid("strict-clean-y")
+	edge := graph.Edge{ID: eid("strict-clean-e"), Type: ontology.DerivedFrom, From: y, To: x}
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: x, Type: ontology.Artifact})
+	g, _ = g.WithVertex(graph.Vertex{ID: y, Type: ontology.Revision})
+	g, _ = g.WithEdge(edge)
+
+	// Delete x AND the edge in the same rewrite.
+	rule := testRule{
+		left: &inlineSubgraph{
+			ids:   []identity.VertexID{x},
+			verts: []graph.Vertex{{ID: x, Type: ontology.Artifact}},
+			edges: []graph.Edge{edge},
+		},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{x: x}}
+
+	e := revision.NewEngineStrict()
+	g2, _, err := e.Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g2.Vertex(x); ok {
+		t.Fatal("x should be deleted")
+	}
+	if _, ok := g2.Edge(edge.ID); ok {
+		t.Fatal("edge should be deleted")
+	}
+}
+
+// Strict mode allows pure additions (no deletions, no dangling risk).
+func TestApplyStrictAllowsPureAddition(t *testing.T) {
+	ctx := context.Background()
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+
+	newV := graph.Vertex{ID: vid("strict-add"), Type: ontology.Artifact}
+	rule := testRule{
+		left:  &inlineSubgraph{},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{ids: []identity.VertexID{newV.ID}, verts: []graph.Vertex{newV}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	e := revision.NewEngineStrict()
+	g2, _, err := e.Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g2.Vertex(newV.ID); !ok {
+		t.Fatal("pure addition should succeed in Strict mode")
+	}
+}
+
+func TestStrictnessAccessor(t *testing.T) {
+	if revision.NewEngine().(interface{ Strictness() revision.Strictness }).Strictness() != revision.Lenient {
+		t.Fatal("NewEngine should default to Lenient")
+	}
+	if revision.NewEngineStrict().(interface{ Strictness() revision.Strictness }).Strictness() != revision.Strict {
+		t.Fatal("NewEngineStrict should be Strict")
+	}
+}
+
+func TestErrDanglingEdgeSentinel(t *testing.T) {
+	if !errors.Is(revision.ErrDanglingEdge, revision.ErrDanglingEdge) {
+		t.Fatal("ErrDanglingEdge must match itself")
+	}
+}
