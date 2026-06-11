@@ -20,6 +20,10 @@
 5. Operator runs `got resolve <ref>` to print the vertex a ref points to via `namespace.Store.ResolveRef` (UC-U09).
 6. Operator runs `got list vertices|edges` to print the graph contents (UC-U10).
 7. Operator runs `got trace <from> <to>` to print whether two vertices are causally connected and the simple causal paths between them via `provenance.Engine` (UC-U11), and `got cone <name>` to print a vertex's provenance cone (UC-S08).
+8. Operator runs `got revise <artifact> <new-revision>` to derive a new `Revision` vertex from an existing `Artifact` through a DPO rewrite (`repo.Service.Revise`, UC-U02), persisting the produced vertex and its `derived_from` edge.
+9. Operator runs `got merge --left <v,...> --right <v,...>` to reconcile two frontiers through `repo.Service.Merge` (UC-U04), or adds `--ancestor <v,...>` to run the three-way reconciliation through `repo.Service.MergeThreeWay` (UC-U18). The CLI prints the merged vertex set or the typed conflicts; persisted state is unchanged.
+10. Operator runs `got materialize <v,...> [--target manifest|manifest.json]` to project the induced subgraph and materialize it for a target through `repo.Service.Materialize` (UC-U06), printing the bundle's emitted paths.
+11. Operator runs `got release <v,...>` to gate a frontier for release through `repo.Service.Release` (UC-U07); with no policy set the gate is vacuously satisfied.
 
 ## Extensions
 
@@ -27,6 +31,7 @@
 
 - **1a. `init` over an existing repository:** the CLI reports that a repository already exists and leaves it unchanged (exit 0).
 - **7a. `trace` between unconnected vertices:** the CLI reports no causal connection and prints no paths (exit 0).
+- **9a. `merge` with `--ancestor`:** the CLI runs three-way reconciliation, honoring each side's additions and deletions relative to the ancestor (UC-U18), and prints the merged set.
 
 ### Failure paths
 
@@ -36,6 +41,9 @@
 - **3b. Missing endpoint:** `add-edge` referencing an unknown `--from`/`--to` vertex prints a diagnostic and exits non-zero.
 - **4a. Bind to unknown vertex:** `bind` to a vertex name not in the graph is rejected (`graph.ErrVertexNotFound`); exit non-zero.
 - **5a. Resolve unbound ref:** `resolve` of a ref with no binding prints "unbound" and exits non-zero.
+- **8a. Revise a non-Artifact or unknown anchor:** `revise` whose anchor is unknown, or is not an `Artifact` (the only admissible `derived_from` source for a new `Revision`), prints a diagnostic and exits non-zero; state unchanged.
+- **9b. Merge over unknown vertices / missing flags:** `merge` missing `--left`/`--right`, or naming a vertex not in the graph, prints a diagnostic and exits non-zero.
+- **10a. Unsupported materialization target:** `materialize --target` naming a target with no registered materializer is rejected (`realization.ErrTargetUnsupported`); exit non-zero.
 - **\*b. Unknown command / missing arguments:** the CLI prints usage and exits non-zero.
 
 ## Sub-variations
@@ -45,5 +53,5 @@
 
 ## Related use cases
 
-- Channel for: UC-U01 (Ingest), UC-U03 (Branch), UC-U09 (Resolve name), UC-U10 (Query graph), UC-U11 (Trace provenance), UC-S08 (Provenance cone).
+- Channel for: UC-U01 (Ingest), UC-U02 (Revise), UC-U03 (Branch), UC-U04 (Merge), UC-U06 (Materialize), UC-U07 (Release), UC-U09 (Resolve name), UC-U10 (Query graph), UC-U11 (Trace provenance), UC-U18 (Three-way merge), UC-S08 (Provenance cone).
 - This UC adds no new engine behavior; it is a new delivery channel (the "input could come from API or CLI" sub-variation) over existing operations.

@@ -45,6 +45,12 @@ go build -o got ./cmd/got
 ./got resolve main
 ./got trace exec art      # causal paths via the provenance engine
 ./got cone exec           # provenance cone
+
+./got revise art rev1                    # derive a Revision from an Artifact (DPO rewrite)
+./got merge --left art --right rev1      # two-way frontier merge
+./got merge --left art --right rev1 --ancestor art   # three-way (UC-U18)
+./got materialize art,rev1               # project + materialize a manifest bundle
+./got release art                        # gate a frontier for release
 ```
 
 Inadmissible edges are rejected by the graph's well-formedness check, so the

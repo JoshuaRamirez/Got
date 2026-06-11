@@ -247,6 +247,75 @@ func TestMergeHappyPath(t *testing.T) {
 	}
 }
 
+// --- MergeThreeWay ---
+
+func TestMergeThreeWayHappyPath(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	// Ancestor holds a; left adds b; right adds c. Three-way reconciliation
+	// honors both additions and yields the union with no conflicts.
+	a := graph.Vertex{ID: vid("twa"), Type: ontology.Artifact}
+	b := graph.Vertex{ID: vid("twb"), Type: ontology.Artifact}
+	c := graph.Vertex{ID: vid("twc"), Type: ontology.Artifact}
+	state, err := svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{a, b, c}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pe := projection.NewEngine()
+	ancestor, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{IDs: []identity.VertexID{a.ID}})
+	left, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{IDs: []identity.VertexID{a.ID, b.ID}})
+	right, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{IDs: []identity.VertexID{a.ID, c.ID}})
+
+	_, mr, err := svc.MergeThreeWay(ctx, state, ancestor, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mr.Frontier == nil || len(mr.Conflicts) != 0 {
+		t.Fatalf("expected clean three-way merge, got %+v", mr)
+	}
+	if len(mr.Frontier.VertexIDs()) != 3 {
+		t.Fatalf("merged frontier should union all 3 vertices, got %d", len(mr.Frontier.VertexIDs()))
+	}
+}
+
+// twoWayOnlyEngine implements composition.Engine but NOT
+// composition.ThreeWayMerger, so the facade must report
+// ErrThreeWayUnsupported.
+type twoWayOnlyEngine struct{}
+
+func (twoWayOnlyEngine) Merge(context.Context, graph.Graph, projection.Frontier, projection.Frontier, []governance.Policy) (composition.MergeResult, error) {
+	return composition.MergeResult{}, nil
+}
+
+func (twoWayOnlyEngine) Resolve(context.Context, graph.Graph, composition.MergeResult, []composition.Resolution) (composition.MergeResult, error) {
+	return composition.MergeResult{}, nil
+}
+
+func TestMergeThreeWayUnsupported(t *testing.T) {
+	ctx := context.Background()
+	gov := governance.NewEngine()
+	ver := verification.NewEngine(gov, nil)
+	svc := repo.NewService(
+		twoWayOnlyEngine{},
+		gov,
+		projection.NewEngine(),
+		realization.NewEngine(),
+		revision.NewEngine(),
+		ver,
+	)
+	state := newState()
+	pe := projection.NewEngine()
+	f, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{})
+
+	_, _, err := svc.MergeThreeWay(ctx, state, f, f, f, nil)
+	if !errors.Is(err, repo.ErrThreeWayUnsupported) {
+		t.Fatalf("expected ErrThreeWayUnsupported, got %v", err)
+	}
+}
+
 // --- Evaluate ---
 
 func TestEvaluateHappyPath(t *testing.T) {

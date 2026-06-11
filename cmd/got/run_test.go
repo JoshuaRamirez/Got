@@ -217,6 +217,130 @@ func TestTraceUnconnected(t *testing.T) {
 	}
 }
 
+func TestReviseDerivesRevision(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "art", "--type", "Artifact")
+	code, out, errs := runCLI(t, "revise", "art", "rev1")
+	if code != 0 {
+		t.Fatalf("revise failed: code=%d err=%s", code, errs)
+	}
+	if !strings.Contains(out, "added revision \"rev1\"") {
+		t.Fatalf("expected revise confirmation, got %q", out)
+	}
+	// The produced Revision vertex and derived_from edge are persisted.
+	_, vout, _ := runCLI(t, "list", "vertices")
+	if !strings.Contains(vout, "rev1\tRevision") {
+		t.Fatalf("expected persisted revision vertex, got %q", vout)
+	}
+	_, eout, _ := runCLI(t, "list", "edges")
+	if !strings.Contains(eout, "rev1 -derived_from-> art") {
+		t.Fatalf("expected persisted derived_from edge, got %q", eout)
+	}
+}
+
+func TestReviseUnknownArtifact(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "revise", "ghost", "rev1")
+	if code != 1 || !strings.Contains(errs, "unknown artifact") {
+		t.Fatalf("expected unknown-artifact rejection, code=%d err=%q", code, errs)
+	}
+}
+
+func TestReviseNonArtifactAnchor(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "p", "--type", "Prompt")
+	code, _, errs := runCLI(t, "revise", "p", "rev1")
+	if code != 1 || !strings.Contains(errs, "not an Artifact") {
+		t.Fatalf("expected non-Artifact rejection, code=%d err=%q", code, errs)
+	}
+}
+
+func TestMergeTwoWayUnion(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	code, out, errs := runCLI(t, "merge", "--left", "a", "--right", "b")
+	if code != 0 {
+		t.Fatalf("merge failed: code=%d err=%s", code, errs)
+	}
+	if !strings.Contains(out, "merged 2 vertex(es)") || !strings.Contains(out, "a, b") {
+		t.Fatalf("expected union of a,b, got %q", out)
+	}
+}
+
+func TestMergeThreeWayHonorsAddition(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "base", "--type", "Artifact")
+	runCLI(t, "add-vertex", "x", "--type", "Artifact")
+	// ancestor={base}, left={base}, right={base,x}: x is a right-side addition.
+	code, out, errs := runCLI(t, "merge", "--left", "base", "--right", "base,x", "--ancestor", "base")
+	if code != 0 {
+		t.Fatalf("three-way merge failed: code=%d err=%s", code, errs)
+	}
+	if !strings.Contains(out, "merged 2 vertex(es)") || !strings.Contains(out, "base, x") {
+		t.Fatalf("expected base,x in three-way merge, got %q", out)
+	}
+}
+
+func TestMergeMissingFlags(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "merge", "--left", "a")
+	if code != 2 || !strings.Contains(errs, "required") {
+		t.Fatalf("expected required-flags diagnostic, code=%d err=%q", code, errs)
+	}
+}
+
+func TestMergeUnknownVertex(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	code, _, errs := runCLI(t, "merge", "--left", "a", "--right", "ghost")
+	if code != 1 || !strings.Contains(errs, "unknown vertex") {
+		t.Fatalf("expected unknown-vertex rejection, code=%d err=%q", code, errs)
+	}
+}
+
+func TestMaterializeManifest(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	code, out, errs := runCLI(t, "materialize", "a,b")
+	if code != 0 {
+		t.Fatalf("materialize failed: code=%d err=%s", code, errs)
+	}
+	if !strings.Contains(out, "materialized manifest: 2 path(s)") {
+		t.Fatalf("expected 2-path manifest, got %q", out)
+	}
+}
+
+func TestMaterializeUnsupportedTarget(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	code, _, errs := runCLI(t, "materialize", "a", "--target", "nonsense")
+	if code != 1 || !strings.Contains(errs, "unsupported") {
+		t.Fatalf("expected unsupported-target rejection, code=%d err=%q", code, errs)
+	}
+}
+
+func TestReleaseNoPolicies(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	code, out, errs := runCLI(t, "release", "a")
+	if code != 0 {
+		t.Fatalf("release failed: code=%d err=%s", code, errs)
+	}
+	if !strings.Contains(out, "released 1 vertex(es)") {
+		t.Fatalf("expected release confirmation, got %q", out)
+	}
+}
+
+func TestReleaseUnknownVertex(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "release", "ghost")
+	if code != 1 || !strings.Contains(errs, "unknown vertex") {
+		t.Fatalf("expected unknown-vertex rejection, code=%d err=%q", code, errs)
+	}
+}
+
 // Persistence: state written by one invocation is visible to the next, even
 // across a fresh process-equivalent run call.
 func TestPersistenceAcrossInvocations(t *testing.T) {

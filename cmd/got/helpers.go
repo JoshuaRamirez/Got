@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/joshuaramirez/got/internal/graph"
+	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/namespace"
+	"github.com/joshuaramirez/got/internal/revision"
 )
 
 // multiFlag collects a repeatable string flag (e.g. --attr k=v --attr a=b).
@@ -59,3 +62,68 @@ func shortID(b []byte) string {
 func joinArrow(names []string) string {
 	return strings.Join(names, " -> ")
 }
+
+// joinComma renders a name list as "a, b, c".
+func joinComma(names []string) string {
+	return strings.Join(names, ", ")
+}
+
+// splitCSV splits a comma-separated flag value into trimmed, non-empty
+// fields. An empty string yields nil.
+func splitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// resolveNames maps a list of vertex names to their content-addressed IDs,
+// erroring on the first name that is not a known vertex in the snapshot.
+func resolveNames(snap *snapshot, names []string) ([]identity.VertexID, error) {
+	ids := make([]identity.VertexID, 0, len(names))
+	for _, n := range names {
+		if _, ok := snap.vertexByName(n); !ok {
+			return nil, fmt.Errorf("unknown vertex %q", n)
+		}
+		ids = append(ids, vid(n))
+	}
+	return ids, nil
+}
+
+// subgraph is a literal in-memory graph.Subgraph used to build DPO rewrite
+// rules in the CLI. Unlike Graph.Induce it can carry produced (R-side)
+// vertices and edges that do not yet exist in the host graph.
+type subgraph struct {
+	ids   []identity.VertexID
+	verts []graph.Vertex
+	edges []graph.Edge
+}
+
+func (s subgraph) VertexIDs() []identity.VertexID { return s.ids }
+func (s subgraph) Vertices() []graph.Vertex       { return s.verts }
+func (s subgraph) Edges() []graph.Edge            { return s.edges }
+func (s subgraph) Hyperedges() []graph.Hyperedge  { return nil }
+
+// rule is a literal DPO rewrite rule with no side conditions.
+type rule struct {
+	left, ctx, right graph.Subgraph
+}
+
+func (r rule) Left() graph.Subgraph                 { return r.left }
+func (r rule) Context() graph.Subgraph              { return r.ctx }
+func (r rule) Right() graph.Subgraph                { return r.right }
+func (r rule) SideConditions() []revision.Predicate { return nil }
+
+// match is a literal injective L → G vertex map.
+type match struct {
+	m map[identity.VertexID]identity.VertexID
+}
+
+func (m match) Mapping() map[identity.VertexID]identity.VertexID { return m.m }

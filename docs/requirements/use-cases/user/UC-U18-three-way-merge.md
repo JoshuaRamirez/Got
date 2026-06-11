@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Goal level | User goal (sea) |
-| Scope | `composition.Engine` (via `composition.DefaultEngine.MergeThreeWay`) |
+| Scope | `composition.Engine` (via `composition.DefaultEngine.MergeThreeWay`), exposed end-to-end by `repo.Service.MergeThreeWay` |
 | Primary actor | Integrator |
 | Stakeholders & interests | Integrator: combine two divergent frontiers without losing either side's intentional changes, and be told precisely where the sides genuinely conflict. Auditor: a deletion on one branch must not be silently undone by the other branch. |
 | Preconditions | Three frontiers are supplied — a common `ancestor` and two descendants `left` and `right` — over a host graph `g`. To detect content-level (modify/modify) divergence the frontiers must carry per-side content (`projection.Edited`); plain ID frontiers yield presence-only three-way semantics. |
@@ -51,6 +51,7 @@
 ## Sub-variations
 
 - **Resolution:** the conflicts returned by a failed three-way merge are the same `composition.Conflict` type the two-way `Merge` produces, so they can be fed to `composition.DefaultEngine.ResolveTyped` with the stock typed resolvers (UC-S04, UC-U17).
+- **Facade passthrough:** `repo.Service.MergeThreeWay` exposes this operation through the top-level facade, mirroring two-way `repo.Service.Merge`. It type-asserts the configured composition engine to `composition.ThreeWayMerger`; an engine that implements only the two-way contract yields `repo.ErrThreeWayUnsupported`. Like `Merge`, it leaves the host graph unchanged and returns the outcome in the `MergeResult`. The `got merge --ancestor ...` CLI command drives this path (UC-U19).
 
 ## Related use cases
 

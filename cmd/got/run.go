@@ -10,6 +10,7 @@ import (
 	"github.com/joshuaramirez/got/internal/composition"
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
+	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/ontology"
 	"github.com/joshuaramirez/got/internal/projection"
 	"github.com/joshuaramirez/got/internal/provenance"
@@ -44,6 +45,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdTrace(rest, stdout, stderr)
 	case "cone":
 		return cmdCone(rest, stdout, stderr)
+	case "revise":
+		return cmdRevise(rest, stdout, stderr)
+	case "merge":
+		return cmdMerge(rest, stdout, stderr)
+	case "materialize":
+		return cmdMaterialize(rest, stdout, stderr)
+	case "release":
+		return cmdRelease(rest, stdout, stderr)
 	case "help", "-h", "--help":
 		usage(stdout)
 		return 0
@@ -66,6 +75,10 @@ usage:
   got list vertices|edges
   got trace <from> <to>
   got cone <name>
+  got revise <artifact> <new-revision>
+  got merge --left <v,...> --right <v,...> [--ancestor <v,...>]
+  got materialize <v,...> [--target manifest|manifest.json]
+  got release <v,...>
 
 state is persisted as JSON under $GOT_DIR (default .got).
 `)
@@ -405,5 +418,247 @@ func cmdCone(args []string, stdout, stderr io.Writer) int {
 	for _, n := range names {
 		fmt.Fprintf(stdout, "  %s\n", n)
 	}
+	return 0
+}
+
+// cmdRevise applies a DPO rewrite that derives a new Revision vertex from an
+// existing Artifact, adding a derived_from edge from the revision to the
+// artifact. It exercises repo.Service.Revise (UC-U02) end-to-end and persists
+// the produced vertex and edge.
+func cmdRevise(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 2 {
+		fmt.Fprintln(stderr, "revise: expected <artifact> <new-revision>")
+		return 2
+	}
+	anchor, newName := args[0], args[1]
+
+	snap, err := loadSnapshot()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	anchorRec, ok := snap.vertexByName(anchor)
+	if !ok {
+		fmt.Fprintf(stderr, "revise: unknown artifact %q\n", anchor)
+		return 1
+	}
+	if anchorRec.Type != string(ontology.Artifact) {
+		fmt.Fprintf(stderr, "revise: %q is %s, not an Artifact\n", anchor, anchorRec.Type)
+		return 1
+	}
+	if _, exists := snap.vertexByName(newName); exists {
+		fmt.Fprintf(stderr, "revise: vertex %q already exists\n", newName)
+		return 1
+	}
+
+	state, err := snap.buildState()
+	if err != nil {
+		fmt.Fprintf(stderr, "revise: %v\n", err)
+		return 1
+	}
+
+	edgeName := fmt.Sprintf("%s-derived_from-%s", newName, anchor)
+	anchorV := graph.Vertex{ID: vid(anchor), Type: ontology.VertexType(anchorRec.Type), Attrs: attrMap(anchorRec.Attrs)}
+	revV := graph.Vertex{ID: vid(newName), Type: ontology.Revision}
+	newEdge := graph.Edge{ID: eid(edgeName), Type: ontology.DerivedFrom, From: revV.ID, To: anchorV.ID}
+
+	r := rule{
+		left:  subgraph{ids: []identity.VertexID{anchorV.ID}, verts: []graph.Vertex{anchorV}},
+		ctx:   subgraph{ids: []identity.VertexID{anchorV.ID}, verts: []graph.Vertex{anchorV}},
+		right: subgraph{ids: []identity.VertexID{anchorV.ID, revV.ID}, verts: []graph.Vertex{anchorV, revV}, edges: []graph.Edge{newEdge}},
+	}
+	m := match{m: map[identity.VertexID]identity.VertexID{anchorV.ID: anchorV.ID}}
+
+	svc := newService()
+	if _, err := svc.Revise(context.Background(), state, r, m); err != nil {
+		fmt.Fprintf(stderr, "revise: %v\n", err)
+		return 1
+	}
+
+	snap.Vertices = append(snap.Vertices, vertexRec{Name: newName, Type: string(ontology.Revision)})
+	snap.Edges = append(snap.Edges, edgeRec{Name: edgeName, Type: string(ontology.DerivedFrom), From: newName, To: anchor})
+	if err := saveSnapshot(snap); err != nil {
+		fmt.Fprintf(stderr, "revise: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "revised %q: added revision %q derived from %q\n", anchor, newName, anchor)
+	return 0
+}
+
+// cmdMerge reconciles two frontiers of named vertices. With --ancestor it runs
+// the three-way merge (repo.Service.MergeThreeWay, UC-U18); otherwise the
+// two-way union merge (repo.Service.Merge, UC-U04). It reports the merged
+// vertex set or the typed conflicts, and does not mutate persisted state.
+func cmdMerge(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var leftCSV, rightCSV, ancestorCSV string
+	fs.StringVar(&leftCSV, "left", "", "comma-separated left vertex names")
+	fs.StringVar(&rightCSV, "right", "", "comma-separated right vertex names")
+	fs.StringVar(&ancestorCSV, "ancestor", "", "comma-separated ancestor vertex names (enables three-way)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if leftCSV == "" || rightCSV == "" {
+		fmt.Fprintln(stderr, "merge: --left and --right are required")
+		return 2
+	}
+
+	snap, err := loadSnapshot()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	state, err := snap.buildState()
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+
+	leftIDs, err := resolveNames(snap, splitCSV(leftCSV))
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	rightIDs, err := resolveNames(snap, splitCSV(rightCSV))
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+
+	ctx := context.Background()
+	pe := projection.NewEngine()
+	left, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{IDs: leftIDs})
+	right, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{IDs: rightIDs})
+
+	svc := newService()
+	var mr composition.MergeResult
+	if ancestorCSV != "" {
+		ancestorIDs, err := resolveNames(snap, splitCSV(ancestorCSV))
+		if err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
+		}
+		ancestor, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{IDs: ancestorIDs})
+		_, mr, err = svc.MergeThreeWay(ctx, state, ancestor, left, right, nil)
+		if err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
+		}
+	} else {
+		_, mr, err = svc.Merge(ctx, state, left, right, nil)
+		if err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
+		}
+	}
+
+	if len(mr.Conflicts) > 0 {
+		idx := snap.nameIndex()
+		fmt.Fprintf(stdout, "merge: %d conflict(s)\n", len(mr.Conflicts))
+		for _, c := range mr.Conflicts {
+			names := make([]string, 0, len(c.Boundary()))
+			for _, id := range c.Boundary() {
+				names = append(names, idx[id])
+			}
+			sort.Strings(names)
+			fmt.Fprintf(stdout, "  %s: %s\n", c.Kind(), joinComma(names))
+		}
+		return 1
+	}
+
+	idx := snap.nameIndex()
+	names := make([]string, 0, len(mr.Frontier.VertexIDs()))
+	for _, id := range mr.Frontier.VertexIDs() {
+		names = append(names, idx[id])
+	}
+	sort.Strings(names)
+	fmt.Fprintf(stdout, "merged %d vertex(es): %s\n", len(names), joinComma(names))
+	return 0
+}
+
+// cmdMaterialize projects the subgraph induced by the named vertices and
+// materializes it for a target (repo.Service.Materialize, UC-U06). It prints
+// the bundle's target and emitted paths.
+func cmdMaterialize(args []string, stdout, stderr io.Writer) int {
+	names, rest, ok := splitName(args)
+	if !ok {
+		fmt.Fprintln(stderr, "materialize: expected '<v,...> [--target manifest|manifest.json]'")
+		return 2
+	}
+	fs := flag.NewFlagSet("materialize", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var target string
+	fs.StringVar(&target, "target", string(realization.ManifestTarget), "materialization target")
+	if err := fs.Parse(rest); err != nil {
+		return 2
+	}
+
+	snap, err := loadSnapshot()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	state, err := snap.buildState()
+	if err != nil {
+		fmt.Fprintf(stderr, "materialize: %v\n", err)
+		return 1
+	}
+	ids, err := resolveNames(snap, splitCSV(names))
+	if err != nil {
+		fmt.Fprintf(stderr, "materialize: %v\n", err)
+		return 1
+	}
+
+	svc := newService()
+	bundle, err := svc.Materialize(context.Background(), state, projection.InduceSpec{IDs: ids}, realization.Target(target))
+	if err != nil {
+		fmt.Fprintf(stderr, "materialize: %v\n", err)
+		return 1
+	}
+
+	paths := append([]string(nil), bundle.Paths()...)
+	sort.Strings(paths)
+	fmt.Fprintf(stdout, "materialized %s: %d path(s)\n", bundle.Target(), len(paths))
+	for _, p := range paths {
+		fmt.Fprintf(stdout, "  %s\n", p)
+	}
+	return 0
+}
+
+// cmdRelease gates a frontier of named vertices for release
+// (repo.Service.Release, UC-U07). With no policy set the governance gate is
+// vacuously satisfied; the command reports the released vertex count.
+func cmdRelease(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "release: expected <v,...>")
+		return 2
+	}
+	snap, err := loadSnapshot()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	state, err := snap.buildState()
+	if err != nil {
+		fmt.Fprintf(stderr, "release: %v\n", err)
+		return 1
+	}
+	ids, err := resolveNames(snap, splitCSV(args[0]))
+	if err != nil {
+		fmt.Fprintf(stderr, "release: %v\n", err)
+		return 1
+	}
+
+	ctx := context.Background()
+	pe := projection.NewEngine()
+	f, _ := pe.Select(ctx, state.Graph(), projection.IDsSelector{IDs: ids})
+
+	svc := newService()
+	if _, err := svc.Release(ctx, state, f, nil); err != nil {
+		fmt.Fprintf(stderr, "release: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "released %d vertex(es)\n", len(ids))
 	return 0
 }

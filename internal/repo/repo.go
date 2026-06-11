@@ -37,6 +37,11 @@ import (
 // ErrIngestRejected indicates Ingest could not accept the supplied payload.
 var ErrIngestRejected = errors.New("repo: ingest rejected")
 
+// ErrThreeWayUnsupported indicates the configured composition engine does
+// not implement three-way merge (composition.ThreeWayMerger). Two-way
+// Merge remains available on every composition Engine.
+var ErrThreeWayUnsupported = errors.New("repo: three-way merge unsupported")
+
 // Payload is the typed input to Ingest. Concrete payload types (e.g.
 // VertexPayload, EdgePayload, BulkPayload) implement this interface and
 // supply their own typed fields. The PayloadKind discriminator mirrors the
@@ -67,6 +72,13 @@ type Service interface {
 
 	// Merge computes the guarded pushout of two frontiers under governance.
 	Merge(ctx context.Context, s State, left, right projection.Frontier, ps []governance.Policy) (State, composition.MergeResult, error)
+
+	// MergeThreeWay reconciles two frontiers against a common ancestor,
+	// honoring each side's additions, modifications, and deletions relative
+	// to that ancestor (UC-U18). It requires the configured composition
+	// engine to implement composition.ThreeWayMerger; otherwise it returns
+	// ErrThreeWayUnsupported.
+	MergeThreeWay(ctx context.Context, s State, ancestor, left, right projection.Frontier, ps []governance.Policy) (State, composition.MergeResult, error)
 
 	// Evaluate runs an evaluation of a frontier in a given environment.
 	Evaluate(ctx context.Context, s State, f projection.Frontier, env verification.EnvironmentBinding) (State, verification.Evaluation, error)
