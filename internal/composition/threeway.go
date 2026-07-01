@@ -131,6 +131,12 @@ func (e *DefaultEngine) MergeThreeWay(ctx context.Context, g graph.Graph, ancest
 		}
 	}
 
+	// Reconcile edges the same way, keyed by EdgeID over the sides'
+	// EdgeEdits. Only Edited frontiers carry edges, so plain frontiers
+	// contribute nothing here.
+	chosenEdges, edgeConflicts := e.reconcileEdges(ancestor, left, right)
+	conflicts = append(conflicts, edgeConflicts...)
+
 	if len(conflicts) > 0 {
 		return MergeResult{Conflicts: conflicts}, nil
 	}
@@ -138,6 +144,9 @@ func (e *DefaultEngine) MergeThreeWay(ctx context.Context, g graph.Graph, ancest
 	merged := projection.NewEditedFrontier(included)
 	for id, v := range chosen {
 		merged.Vertices[id] = v
+	}
+	for id, ed := range chosenEdges {
+		merged.Edges[id] = ed
 	}
 
 	decision, obligations, err := e.governance.Check(ctx, g, merged, ps)
@@ -303,6 +312,118 @@ func firstAttrDiff(a, b graph.AttrMap, eq AttrsEqualFunc) (string, any, any, boo
 		}
 	}
 	return "", nil, nil, false
+}
+
+// reconcileEdges performs the same ancestor-relative three-way merge over
+// edges as the vertex pass, keyed by EdgeID over each side's EdgeEdits.
+// Only projection.Edited frontiers carry edges; a plain frontier contributes
+// an empty edge map. Returns the chosen edges and any edge conflicts.
+//
+// Edge conflicts are surfaced as Structural (edges have no per-medium kind of
+// their own): both-sides-changed-differently, add/add-differ, and
+// modify/delete all report Structural, with a StructuralPayload on the
+// type-divergence case.
+func (e *DefaultEngine) reconcileEdges(ancestor, left, right projection.Frontier) (map[identity.EdgeID]graph.Edge, []Conflict) {
+	aE := edgeEditsOf(ancestor)
+	lE := edgeEditsOf(left)
+	rE := edgeEditsOf(right)
+
+	union := make(map[identity.EdgeID]bool, len(aE)+len(lE)+len(rE))
+	for id := range aE {
+		union[id] = true
+	}
+	for id := range lE {
+		union[id] = true
+	}
+	for id := range rE {
+		union[id] = true
+	}
+	ids := make([]identity.EdgeID, 0, len(union))
+	for id := range union {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
+
+	chosen := make(map[identity.EdgeID]graph.Edge)
+	var conflicts []Conflict
+	for _, id := range ids {
+		av, inA := aE[id]
+		lv, inL := lE[id]
+		rv, inR := rE[id]
+
+		switch {
+		case inL && inR && inA:
+			switch {
+			case e.edgeContentEqual(lv, rv):
+				chosen[id] = lv
+			case e.edgeContentEqual(lv, av):
+				chosen[id] = rv
+			case e.edgeContentEqual(rv, av):
+				chosen[id] = lv
+			default:
+				conflicts = append(conflicts, edgeConflict(lv, rv))
+			}
+		case !inA && inL && inR:
+			if e.edgeContentEqual(lv, rv) {
+				chosen[id] = lv
+			} else {
+				conflicts = append(conflicts, edgeConflict(lv, rv))
+			}
+		case !inA && inL && !inR:
+			chosen[id] = lv
+		case !inA && !inL && inR:
+			chosen[id] = rv
+		case inA && inL && !inR:
+			if !e.edgeContentEqual(lv, av) {
+				conflicts = append(conflicts, edgeModifyDeleteConflict(lv, "left"))
+			}
+		case inA && !inL && inR:
+			if !e.edgeContentEqual(rv, av) {
+				conflicts = append(conflicts, edgeModifyDeleteConflict(rv, "right"))
+			}
+		case inA && !inL && !inR:
+			// deleted on both sides → omit
+		}
+	}
+	return chosen, conflicts
+}
+
+// edgeEditsOf returns the EdgeEdits map of an Edited frontier, or nil.
+func edgeEditsOf(f projection.Frontier) map[identity.EdgeID]graph.Edge {
+	if ed, ok := f.(projection.Edited); ok {
+		return ed.EdgeEdits()
+	}
+	return nil
+}
+
+// edgeContentEqual reports whether two edges carry the same content: type,
+// endpoints, and attributes (via the engine's Attrs equivalence).
+func (e *DefaultEngine) edgeContentEqual(a, b graph.Edge) bool {
+	if a.Type != b.Type || a.From != b.From || a.To != b.To {
+		return false
+	}
+	return attrsMapEqual(a.Attrs, b.Attrs, e.attrsEqual)
+}
+
+// edgeConflict builds a Structural conflict for two edges (same ID) that
+// disagree, attaching a StructuralPayload with the endpoint pair and types.
+func edgeConflict(l, r graph.Edge) Conflict {
+	return auditConflict{
+		kind:     Structural,
+		boundary: []identity.VertexID{l.From, l.To},
+		detail:   fmt.Sprintf("edge %v: (%v -%s-> %v) vs (%v -%s-> %v)", l.ID, l.From, l.Type, l.To, r.From, r.Type, r.To),
+		payload:  StructuralPayload{From: l.From, To: l.To, LeftType: l.Type, RightType: r.Type},
+	}
+}
+
+// edgeModifyDeleteConflict builds a Structural conflict for an edge deleted on
+// one side and modified on the other relative to the ancestor.
+func edgeModifyDeleteConflict(kept graph.Edge, modifiedSide string) Conflict {
+	return auditConflict{
+		kind:     Structural,
+		boundary: []identity.VertexID{kept.From, kept.To},
+		detail:   fmt.Sprintf("edge %v: %s modified while the other side deleted it", kept.ID, modifiedSide),
+	}
 }
 
 // modifyDeleteConflict builds a Structural conflict for the case where one
