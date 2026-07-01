@@ -623,3 +623,152 @@ func TestErrIdentityCollisionSentinel(t *testing.T) {
 		t.Fatal("ErrIdentityCollision must match itself")
 	}
 }
+
+// --- Strict step 3: hyperedge sub-pattern support ---
+
+// hyperGraph builds a graph with the vertices needed for a canonical
+// `executes` hyperedge and returns the graph plus a valid hyperedge over them.
+func hyperGraph(t *testing.T) (graph.Graph, graph.Hyperedge) {
+	t.Helper()
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	add := func(id identity.VertexID, vt ontology.VertexType) {
+		var err error
+		g, err = g.WithVertex(graph.Vertex{ID: id, Type: vt})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(vid("prompt"), ontology.Prompt)
+	add(vid("model"), ontology.Model)
+	add(vid("policy"), ontology.Policy)
+	add(vid("art"), ontology.Artifact)
+	add(vid("rev"), ontology.Revision)
+	add(vid("obs"), ontology.Observation)
+
+	h := graph.Hyperedge{
+		ID:      hid("hx"),
+		Type:    ontology.Executes,
+		Inputs:  []identity.VertexID{vid("prompt"), vid("model"), vid("policy"), vid("art")},
+		Outputs: []identity.VertexID{vid("rev"), vid("obs")},
+	}
+	return g, h
+}
+
+func hid(s string) identity.HyperedgeID {
+	return identity.HyperedgeID(sha256.Sum256([]byte(s)))
+}
+
+// R-side hyperedge is inserted into the graph (endpoints already present).
+func TestApplyInsertsRSideHyperedge(t *testing.T) {
+	ctx := context.Background()
+	g, h := hyperGraph(t)
+
+	rule := testRule{
+		left:  &inlineSubgraph{},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{hypers: []graph.Hyperedge{h}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	g2, _, err := revision.NewEngine().Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g2.Hyperedge(h.ID); !ok {
+		t.Fatal("expected R-side hyperedge to be inserted")
+	}
+}
+
+// L-side (non-context) hyperedge is deleted from the graph.
+func TestApplyDeletesLSideHyperedge(t *testing.T) {
+	ctx := context.Background()
+	g, h := hyperGraph(t)
+	g, err := g.WithHyperedge(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rule := testRule{
+		left:  &inlineSubgraph{hypers: []graph.Hyperedge{h}},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	g2, _, err := revision.NewEngine().Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g2.Hyperedge(h.ID); ok {
+		t.Fatal("expected L-side hyperedge to be deleted")
+	}
+}
+
+// Strict allows inserting a fresh R-side hyperedge (no collision).
+func TestApplyStrictAllowsHyperedgeInsertion(t *testing.T) {
+	ctx := context.Background()
+	g, h := hyperGraph(t)
+
+	rule := testRule{
+		left:  &inlineSubgraph{},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{hypers: []graph.Hyperedge{h}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	g2, _, err := revision.NewEngineStrict().Apply(ctx, g, rule, match)
+	if err != nil {
+		t.Fatalf("strict fresh hyperedge insertion should succeed, got %v", err)
+	}
+	if _, ok := g2.Hyperedge(h.ID); !ok {
+		t.Fatal("expected hyperedge inserted under Strict")
+	}
+}
+
+// Strict refuses a produced hyperedge whose ID collides with different host
+// content.
+func TestApplyStrictRefusesHyperedgeIdentityCollision(t *testing.T) {
+	ctx := context.Background()
+	g, h := hyperGraph(t)
+	g, err := g.WithHyperedge(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same ID, different content (drop an input) — a content-addressing
+	// violation. Collision is detected before admissibility validation.
+	clobber := h
+	clobber.Inputs = []identity.VertexID{vid("prompt"), vid("model"), vid("policy")}
+	rule := testRule{
+		left:  &inlineSubgraph{},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{hypers: []graph.Hyperedge{clobber}},
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	_, _, err = revision.NewEngineStrict().Apply(ctx, g, rule, match)
+	if !errors.Is(err, revision.ErrIdentityCollision) {
+		t.Fatalf("expected ErrIdentityCollision for hyperedge, got %v", err)
+	}
+}
+
+// Strict allows an idempotent re-statement of an existing hyperedge.
+func TestApplyStrictAllowsHyperedgeRestatement(t *testing.T) {
+	ctx := context.Background()
+	g, h := hyperGraph(t)
+	g, err := g.WithHyperedge(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rule := testRule{
+		left:  &inlineSubgraph{},
+		ctx:   &inlineSubgraph{},
+		right: &inlineSubgraph{hypers: []graph.Hyperedge{h}}, // identical content
+	}
+	match := testMatch{m: map[identity.VertexID]identity.VertexID{}}
+
+	if _, _, err := revision.NewEngineStrict().Apply(ctx, g, rule, match); err != nil {
+		t.Fatalf("idempotent hyperedge re-statement should be allowed, got %v", err)
+	}
+}

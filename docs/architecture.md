@@ -188,12 +188,16 @@ are not full categorical mechanisms:
   "pushout complement does not exist" are unreachable.
 - **`revision.Apply`** is "delete L\K, keep K, add R\K" using IDs
   declared by the Rule, not the construction of a pushout complement
-  from scratch. Strict mode (`NewEngineStrict`) closes two of the
+  from scratch. Strict mode (`NewEngineStrict`) closes the practical
   approximations: the delete-side pushout-complement check
-  (`ErrDanglingEdge`) and the produce-side content-addressing check
+  (`ErrDanglingEdge`), the produce-side content-addressing check
   (`ErrIdentityCollision`, refusing a declared R-side ID that would
-  overwrite different host content). Lenient mode keeps the historical
-  silent-drop / silent-overwrite behavior.
+  overwrite different host content), and full hyperedge handling —
+  L\K hyperedges are deleted, R\K hyperedges inserted, and both audits
+  cover hyperedges. Lenient mode keeps the historical silent-drop /
+  silent-overwrite behavior. What remains simplified is only the
+  categorical *construction* (IDs are Rule-declared rather than derived
+  as a pushout object); the observable contract is now honored.
 - **`provenance.Close`** treats causal edges as undirected. The
   axioms (extensive, monotone, idempotent) still hold, but a future
   directional interpretation would yield different traces.

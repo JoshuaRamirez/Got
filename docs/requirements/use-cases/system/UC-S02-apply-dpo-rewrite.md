@@ -47,8 +47,8 @@
 - **4a. Inserting the right-hand side violates schema admissibility:**
   - 4a1. System returns `graph.ErrNotWellFormed` and discards the partial graph.
 - **4d. Produced element collides with different host content (Strict mode):**
-  - 4d1. A produced (R-side) vertex or edge declares an ID already present in the post-deletion graph but with structurally different content, so the caller-declared ID is not a faithful content address.
-  - 4d2. System returns `revision.ErrIdentityCollision` and leaves the input graph unchanged. (Lenient mode instead silently overwrites the existing element via `graph.WithVertex`/`WithEdge`.)
+  - 4d1. A produced (R-side) vertex, edge, or hyperedge declares an ID already present in the post-deletion graph but with structurally different content, so the caller-declared ID is not a faithful content address.
+  - 4d2. System returns `revision.ErrIdentityCollision` and leaves the input graph unchanged. (Lenient mode instead silently overwrites the existing element via `graph.WithVertex`/`WithEdge`/`WithHyperedge`.)
 - **\*. `ctx` cancelled:**
   - System returns `ctx.Err()`.
 

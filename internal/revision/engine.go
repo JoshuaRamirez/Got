@@ -33,10 +33,11 @@ const (
 //     Vertex IDs in K are common to L and R (the preserved interface).
 //   - The Match supplies the injective mapping m: L → G for the consumed
 //     pattern. Context vertices must be present in m's domain too.
-//   - Vertices and edges in R that are not in K are added to G with the IDs
-//     declared in R (i.e. R supplies fresh, content-addressed IDs).
-//   - Vertices and edges in L that are not in K are deleted from G via the
-//     match.
+//   - Vertices, edges, and hyperedges in R that are not in K are added to G
+//     with the IDs declared in R (i.e. R supplies fresh, content-addressed
+//     IDs).
+//   - Vertices, edges, and hyperedges in L that are not in K are deleted from
+//     G via the match.
 //
 // This is a literal "delete what's in L\K, keep what's in K, add what's in
 // R\K" interpretation. It does not attempt to compute the pushout complement
@@ -122,20 +123,29 @@ func (e dpoEngine) Apply(ctx context.Context, g graph.Graph, r Rule, m Match) (g
 		}
 	}
 
+	leftHypers := hyperedgeIDSet(left.Hyperedges())
+	contextHypers := hyperedgeIDSet(context_.Hyperedges())
+	deleteHypers := make(map[identity.HyperedgeID]bool)
+	for hid := range leftHypers {
+		if !contextHypers[hid] {
+			deleteHypers[hid] = true
+		}
+	}
+
 	if e.strictness == Strict {
-		if danglers := danglingEdges(g, deleteSet, deleteEdges); len(danglers) > 0 {
+		if danglers := danglingEdges(g, deleteSet, deleteEdges, deleteHypers); len(danglers) > 0 {
 			return nil, ChangeCapsule{}, fmt.Errorf("%w: %d edge(s)/hyperedge(s) would be orphaned by deletion",
 				ErrDanglingEdge, len(danglers))
 		}
 	}
 
-	newGraph, err := rebuildWithout(g, deleteSet, deleteEdges)
+	newGraph, err := rebuildWithout(g, deleteSet, deleteEdges, deleteHypers)
 	if err != nil {
 		return nil, ChangeCapsule{}, err
 	}
 
 	if e.strictness == Strict {
-		if cols := contentCollisions(newGraph, right, contextIDs, contextEdges); len(cols) > 0 {
+		if cols := contentCollisions(newGraph, right, contextIDs, contextEdges, contextHypers); len(cols) > 0 {
 			return nil, ChangeCapsule{}, fmt.Errorf("%w: %d produced element(s) collide with different host content",
 				ErrIdentityCollision, len(cols))
 		}
@@ -162,6 +172,16 @@ func (e dpoEngine) Apply(ctx context.Context, g graph.Graph, r Rule, m Match) (g
 		newGraph, err = newGraph.WithEdge(e)
 		if err != nil {
 			return nil, ChangeCapsule{}, fmt.Errorf("revision: insert edge %v failed: %w", e.ID, err)
+		}
+	}
+
+	for _, h := range right.Hyperedges() {
+		if contextHypers[h.ID] {
+			continue
+		}
+		newGraph, err = newGraph.WithHyperedge(h)
+		if err != nil {
+			return nil, ChangeCapsule{}, fmt.Errorf("revision: insert hyperedge %v failed: %w", h.ID, err)
 		}
 	}
 
@@ -193,10 +213,11 @@ func (dpoEngine) Replayable(ctx context.Context, g graph.Graph, c ChangeCapsule)
 	return nil
 }
 
-// rebuildWithout returns a new graph that excludes the given vertices and
-// edges. Edges that touch a deleted vertex are also dropped. The result
-// uses the same schema as the input via graph.Graph.Empty.
-func rebuildWithout(g graph.Graph, deleteVerts map[identity.VertexID]bool, deleteEdges map[identity.EdgeID]bool) (graph.Graph, error) {
+// rebuildWithout returns a new graph that excludes the given vertices,
+// edges, and hyperedges. Edges and hyperedges that touch a deleted vertex
+// are also dropped, as are hyperedges explicitly listed in deleteHypers.
+// The result uses the same schema as the input via graph.Graph.Empty.
+func rebuildWithout(g graph.Graph, deleteVerts map[identity.VertexID]bool, deleteEdges map[identity.EdgeID]bool, deleteHypers map[identity.HyperedgeID]bool) (graph.Graph, error) {
 	out := g.Empty()
 
 	for _, v := range g.Vertices() {
@@ -223,6 +244,9 @@ func rebuildWithout(g graph.Graph, deleteVerts map[identity.VertexID]bool, delet
 		}
 	}
 	for _, h := range g.Hyperedges() {
+		if deleteHypers[h.ID] {
+			continue
+		}
 		touched := false
 		for _, id := range h.Inputs {
 			if deleteVerts[id] {
@@ -248,6 +272,15 @@ func rebuildWithout(g graph.Graph, deleteVerts map[identity.VertexID]bool, delet
 		}
 	}
 	return out, nil
+}
+
+// hyperedgeIDSet collects the IDs of the given hyperedges.
+func hyperedgeIDSet(hypers []graph.Hyperedge) map[identity.HyperedgeID]bool {
+	s := make(map[identity.HyperedgeID]bool, len(hypers))
+	for _, h := range hypers {
+		s[h.ID] = true
+	}
+	return s
 }
 
 func vertexSet(ids []identity.VertexID) map[identity.VertexID]bool {
@@ -279,7 +312,10 @@ type Dangler struct {
 // that Lenient mode would silently drop; Strict mode refuses the
 // rewrite when any such item exists. Categorically, the pushout
 // complement of l along m does not exist when this set is non-empty.
-func danglingEdges(g graph.Graph, deleteVerts map[identity.VertexID]bool, deleteEdges map[identity.EdgeID]bool) []Dangler {
+//
+// Hyperedges explicitly consumed by the rule (deleteHypers, i.e. L\K
+// hyperedges) are excluded — deleting them is intentional, not orphaning.
+func danglingEdges(g graph.Graph, deleteVerts map[identity.VertexID]bool, deleteEdges map[identity.EdgeID]bool, deleteHypers map[identity.HyperedgeID]bool) []Dangler {
 	if len(deleteVerts) == 0 {
 		return nil
 	}
@@ -293,6 +329,9 @@ func danglingEdges(g graph.Graph, deleteVerts map[identity.VertexID]bool, delete
 		}
 	}
 	for _, h := range g.Hyperedges() {
+		if deleteHypers[h.ID] {
+			continue
+		}
 		orphaned := false
 		for _, vid := range h.Inputs {
 			if deleteVerts[vid] {
@@ -317,29 +356,25 @@ func danglingEdges(g graph.Graph, deleteVerts map[identity.VertexID]bool, delete
 
 // Collision identifies one produced (R-side) element whose caller-declared
 // ID already binds structurally different content in the post-deletion
-// graph. VertexID is non-zero for a vertex collision; EdgeID is non-zero
-// for an edge collision. Exactly one is set.
+// graph. Exactly one of VertexID / EdgeID / HyperedgeID is non-zero.
 type Collision struct {
-	VertexID identity.VertexID
-	EdgeID   identity.EdgeID
+	VertexID    identity.VertexID
+	EdgeID      identity.EdgeID
+	HyperedgeID identity.HyperedgeID
 }
 
-// contentCollisions returns the produced (non-context) vertices and edges in
-// `right` whose IDs already exist in `post` (the host graph after deletions)
-// bound to structurally different content. These are exactly the insertions
-// where graph.WithVertex / graph.WithEdge would silently overwrite an
-// existing element with a different value — a content-addressing violation,
-// because equal IDs must imply equal content.
+// contentCollisions returns the produced (non-context) vertices, edges, and
+// hyperedges in `right` whose IDs already exist in `post` (the host graph
+// after deletions) bound to structurally different content. These are exactly
+// the insertions where graph.WithVertex / WithEdge / WithHyperedge would
+// silently overwrite an existing element with a different value — a
+// content-addressing violation, because equal IDs must imply equal content.
 //
 // Context (K-side) elements are excluded: they are the preserved interface
 // and are expected to already exist with matching content. Produced elements
 // that re-state existing identical content are not collisions (the rewrite is
 // idempotent on them). Genuinely new IDs are not collisions.
-//
-// Hyperedges are not audited because the current Apply does not insert R-side
-// hyperedges (see the insertion loops in Apply); there is no overwrite to
-// guard against.
-func contentCollisions(post graph.Graph, right graph.Subgraph, contextVerts map[identity.VertexID]bool, contextEdges map[identity.EdgeID]bool) []Collision {
+func contentCollisions(post graph.Graph, right graph.Subgraph, contextVerts map[identity.VertexID]bool, contextEdges map[identity.EdgeID]bool, contextHypers map[identity.HyperedgeID]bool) []Collision {
 	var collisions []Collision
 
 	for _, v := range right.Vertices() {
@@ -357,6 +392,15 @@ func contentCollisions(post graph.Graph, right graph.Subgraph, contextVerts map[
 		}
 		if existing, ok := post.Edge(e.ID); ok && !edgeContentEqual(existing, e) {
 			collisions = append(collisions, Collision{EdgeID: e.ID})
+		}
+	}
+
+	for _, h := range right.Hyperedges() {
+		if contextHypers[h.ID] {
+			continue
+		}
+		if existing, ok := post.Hyperedge(h.ID); ok && !hyperedgeContentEqual(existing, h) {
+			collisions = append(collisions, Collision{HyperedgeID: h.ID})
 		}
 	}
 
@@ -379,6 +423,28 @@ func edgeContentEqual(a, b graph.Edge) bool {
 		a.From == b.From &&
 		a.To == b.To &&
 		attrMapEqual(a.Attrs, b.Attrs)
+}
+
+// hyperedgeContentEqual reports whether two hyperedges with the same ID carry
+// the same content: type, ordered inputs/outputs, and attributes.
+func hyperedgeContentEqual(a, b graph.Hyperedge) bool {
+	return a.Type == b.Type &&
+		vertexSliceEqual(a.Inputs, b.Inputs) &&
+		vertexSliceEqual(a.Outputs, b.Outputs) &&
+		attrMapEqual(a.Attrs, b.Attrs)
+}
+
+// vertexSliceEqual reports whether two vertex-ID slices are equal in order.
+func vertexSliceEqual(a, b []identity.VertexID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // attrMapEqual compares two attribute maps by deep equality, treating a nil
