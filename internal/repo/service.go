@@ -223,6 +223,38 @@ func (s *DefaultService) Release(ctx context.Context, state State, f projection.
 	return state, nil
 }
 
+// ReleaseStrict runs the composition structural/temporal audit over the
+// frontier before delegating to the same governance gate as Release. It
+// closes the seam documented in TestIntegrationTemporalConflictSurfaceArea:
+// plain Release gates on policy only and does not catch a malformed
+// TimeTriple or an incompatible edge collision reachable from the frontier.
+//
+// Requires the wired composition engine to satisfy composition.Auditor
+// (the default DefaultEngine does); returns ErrAuditUnsupported otherwise.
+// On a non-empty audit it returns ErrReleaseAudit naming the conflict kinds
+// and leaves the state unchanged.
+func (s *DefaultService) ReleaseStrict(ctx context.Context, state State, f projection.Frontier, ps []governance.Policy) (State, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	auditor, ok := s.composition.(composition.Auditor)
+	if !ok {
+		return nil, ErrAuditUnsupported
+	}
+	conflicts, err := auditor.Audit(ctx, state.Graph(), f)
+	if err != nil {
+		return nil, err
+	}
+	if len(conflicts) > 0 {
+		kinds := make([]string, 0, len(conflicts))
+		for _, c := range conflicts {
+			kinds = append(kinds, string(c.Kind()))
+		}
+		return nil, fmt.Errorf("%w: %v", ErrReleaseAudit, kinds)
+	}
+	return s.Release(ctx, state, f, ps)
+}
+
 // defaultStateWith returns a State whose graph is replaced with g and
 // whose namespace is preserved from the input state. If state is the
 // concrete *DefaultState, the helper preserves that type; otherwise it

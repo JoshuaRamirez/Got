@@ -51,6 +51,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-S18](system/UC-S18-check-ontology-admissibility.md) | Check whether an edge or hyperedge is admissible | `ontology.Schema` | `internal/ontology` |
 | [UC-S19](system/UC-S19-check-replay-feasibility.md) | Check whether a change capsule is replayable | `revision.Engine` | `internal/revision` |
 | [UC-S20](system/UC-S20-check-temporal-validity.md) | Check the temporal validity of a vertex | `temporal.Engine` | `internal/temporal` |
+| [UC-S21](system/UC-S21-audit-frontier-wellformedness.md) | Audit a frontier for structural and temporal well-formedness | `composition.Engine` | `internal/composition` |
 
 ## Coverage
 

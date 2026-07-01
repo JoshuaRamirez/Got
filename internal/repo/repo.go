@@ -41,6 +41,15 @@ var ErrIngestRejected = errors.New("repo: ingest rejected")
 // implement composition.ThreeWayMerger, so MergeThreeWay cannot run.
 var ErrThreeWayUnsupported = errors.New("repo: three-way merge unsupported by composition engine")
 
+// ErrAuditUnsupported indicates the wired composition engine does not
+// implement composition.Auditor, so ReleaseStrict cannot run the
+// structural/temporal audit.
+var ErrAuditUnsupported = errors.New("repo: audit unsupported by composition engine")
+
+// ErrReleaseAudit indicates a Strict release was blocked because the
+// composition audit found structural or temporal conflicts in the frontier.
+var ErrReleaseAudit = errors.New("repo: release blocked by audit")
+
 // Payload is the typed input to Ingest. Concrete payload types (e.g.
 // VertexPayload, EdgePayload, BulkPayload) implement this interface and
 // supply their own typed fields. The PayloadKind discriminator mirrors the
@@ -86,4 +95,12 @@ type Service interface {
 
 	// Release gates a frontier for release under the given policies.
 	Release(ctx context.Context, s State, f projection.Frontier, ps []governance.Policy) (State, error)
+
+	// ReleaseStrict runs the composition structural/temporal audit over the
+	// frontier before the governance gate, refusing release with
+	// ErrReleaseAudit if the frontier is not well-formed. It requires the
+	// wired composition engine to satisfy composition.Auditor; otherwise it
+	// returns ErrAuditUnsupported. This is the Strict-on-Release path that
+	// plain Release deliberately omits.
+	ReleaseStrict(ctx context.Context, s State, f projection.Frontier, ps []governance.Policy) (State, error)
 }
