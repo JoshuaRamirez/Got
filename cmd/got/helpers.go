@@ -59,3 +59,15 @@ func shortID(b []byte) string {
 func joinArrow(names []string) string {
 	return strings.Join(names, " -> ")
 }
+
+// splitCSV splits a comma-separated list, trimming whitespace and dropping
+// empty entries.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}

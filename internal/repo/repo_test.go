@@ -387,3 +387,66 @@ func TestReviseDelegatesToReviseWithCapsule(t *testing.T) {
 		t.Fatal("revised graph should contain new vertex via Revise delegation")
 	}
 }
+
+// --- UC-U18 facade passthrough ---
+
+// MergeThreeWay routes through the facade to composition's three-way merger:
+// a one-sided change is taken automatically and no conflict is raised.
+func TestMergeThreeWayFacadeOneSidedChange(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	id := vid("v")
+	ancestor := projection.NewEditedFrontier([]identity.VertexID{id})
+	ancestor.Vertices[id] = graph.Vertex{ID: id, Type: ontology.Artifact, Attrs: graph.AttrMap{"x": "1"}}
+	left := projection.NewEditedFrontier([]identity.VertexID{id})
+	left.Vertices[id] = graph.Vertex{ID: id, Type: ontology.Artifact, Attrs: graph.AttrMap{"x": "2"}} // changed
+	right := projection.NewEditedFrontier([]identity.VertexID{id})
+	right.Vertices[id] = graph.Vertex{ID: id, Type: ontology.Artifact, Attrs: graph.AttrMap{"x": "1"}} // unchanged
+
+	_, mr, err := svc.MergeThreeWay(ctx, state, ancestor, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mr.Conflicts) != 0 {
+		t.Fatalf("expected no conflicts, got %d", len(mr.Conflicts))
+	}
+	if mr.Frontier == nil {
+		t.Fatal("expected a merged frontier through the facade")
+	}
+	ed := mr.Frontier.(*projection.EditedFrontier)
+	if got := ed.Vertices[id].Attrs["x"]; got != "2" {
+		t.Fatalf("expected left change x=2 to win, got %v", got)
+	}
+}
+
+// MergeThreeWay surfaces conflicts (merged-xor-conflicted) through the facade.
+func TestMergeThreeWayFacadeConflict(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	id := vid("v")
+	mk := func(val string) *projection.EditedFrontier {
+		f := projection.NewEditedFrontier([]identity.VertexID{id})
+		f.Vertices[id] = graph.Vertex{ID: id, Type: ontology.Artifact, Attrs: graph.AttrMap{"x": val}}
+		return f
+	}
+	_, mr, err := svc.MergeThreeWay(ctx, state, mk("1"), mk("2"), mk("3"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mr.Frontier != nil {
+		t.Fatal("modify/modify conflict must not yield a merged frontier")
+	}
+	if len(mr.Conflicts) != 1 || mr.Conflicts[0].Kind() != composition.Textual {
+		t.Fatalf("expected one Textual conflict, got %+v", mr.Conflicts)
+	}
+}
+
+func TestErrThreeWayUnsupportedSentinel(t *testing.T) {
+	if !errors.Is(repo.ErrThreeWayUnsupported, repo.ErrThreeWayUnsupported) {
+		t.Fatal("sentinel must match itself")
+	}
+}

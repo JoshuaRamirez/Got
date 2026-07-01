@@ -20,6 +20,9 @@
 5. Operator runs `got resolve <ref>` to print the vertex a ref points to via `namespace.Store.ResolveRef` (UC-U09).
 6. Operator runs `got list vertices|edges` to print the graph contents (UC-U10).
 7. Operator runs `got trace <from> <to>` to print whether two vertices are causally connected and the simple causal paths between them via `provenance.Engine` (UC-U11), and `got cone <name>` to print a vertex's provenance cone (UC-S08).
+8. Operator runs `got merge <listA> <listB>` (comma-separated vertex names) to compute the guarded-pushout merge of two frontiers via `repo.Service.Merge` (UC-U04), printing the merged vertices and witness, or the typed conflicts.
+9. Operator runs `got merge3 <ancestor> <left> <right>` to reconcile two frontiers against a common ancestor via `repo.Service.MergeThreeWay` (UC-U18); with ID-only frontiers this is presence-only three-way, so a one-sided deletion is honored.
+10. Operator runs `got materialize` to project the whole graph and materialize a manifest bundle via `repo.Service.Materialize` (UC-U06), printing the bundle paths.
 
 ## Extensions
 
@@ -45,5 +48,5 @@
 
 ## Related use cases
 
-- Channel for: UC-U01 (Ingest), UC-U03 (Branch), UC-U09 (Resolve name), UC-U10 (Query graph), UC-U11 (Trace provenance), UC-S08 (Provenance cone).
+- Channel for: UC-U01 (Ingest), UC-U03 (Branch), UC-U04 (Merge), UC-U06 (Materialize), UC-U09 (Resolve name), UC-U10 (Query graph), UC-U11 (Trace provenance), UC-U18 (Three-way merge), UC-S08 (Provenance cone).
 - This UC adds no new engine behavior; it is a new delivery channel (the "input could come from API or CLI" sub-variation) over existing operations.

@@ -176,6 +176,23 @@ func (s *DefaultService) Merge(ctx context.Context, state State, left, right pro
 	return state, mr, nil
 }
 
+// MergeThreeWay reconciles two divergent frontiers against a common
+// ancestor by delegating to the composition engine's three-way capability
+// (UC-U18). The wired composition.Engine must satisfy
+// composition.ThreeWayMerger — the default DefaultEngine does. Returns
+// ErrThreeWayUnsupported otherwise.
+func (s *DefaultService) MergeThreeWay(ctx context.Context, state State, ancestor, left, right projection.Frontier, ps []governance.Policy) (State, composition.MergeResult, error) {
+	tw, ok := s.composition.(composition.ThreeWayMerger)
+	if !ok {
+		return nil, composition.MergeResult{}, ErrThreeWayUnsupported
+	}
+	mr, err := tw.MergeThreeWay(ctx, state.Graph(), ancestor, left, right, ps)
+	if err != nil {
+		return nil, composition.MergeResult{}, err
+	}
+	return state, mr, nil
+}
+
 // Evaluate runs an evaluation against a frontier.
 func (s *DefaultService) Evaluate(ctx context.Context, state State, f projection.Frontier, env verification.EnvironmentBinding) (State, verification.Evaluation, error) {
 	eval, err := s.verification.Evaluate(ctx, state.Graph(), f, env)
