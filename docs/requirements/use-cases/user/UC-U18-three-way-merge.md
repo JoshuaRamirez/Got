@@ -50,6 +50,7 @@
 
 ## Sub-variations
 
+- **Edge reconciliation:** when the frontiers are `projection.Edited`, edges carried in their `EdgeEdits` maps are reconciled by the same ancestor-relative rules, keyed by `EdgeID`: a one-sided edge change is taken, an agreed change is taken, a one-sided deletion is honored, and both-sides-differ (modify/modify or add/add) and modify/delete surface as `Structural` conflicts (with a `StructuralPayload` on type divergence). Plain (non-`Edited`) frontiers carry no edges, so edge reconciliation is a no-op for them.
 - **Resolution:** the conflicts returned by a failed three-way merge are the same `composition.Conflict` type the two-way `Merge` produces, so they can be fed to `composition.DefaultEngine.ResolveTyped` with the stock typed resolvers (UC-S04, UC-U17).
 
 ## Related use cases

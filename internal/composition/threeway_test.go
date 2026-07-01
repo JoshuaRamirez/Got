@@ -362,3 +362,134 @@ func TestMergeThreeWayContextCancelled(t *testing.T) {
 		t.Fatal("expected ctx cancellation error")
 	}
 }
+
+// --- edge-level three-way (PR D) ---
+
+// edgedFrontier builds an EditedFrontier carrying the given edges (and their
+// endpoint vertices as members).
+func edgedFrontier(edges ...graph.Edge) *projection.EditedFrontier {
+	seen := map[identity.VertexID]bool{}
+	var ids []identity.VertexID
+	for _, e := range edges {
+		for _, v := range []identity.VertexID{e.From, e.To} {
+			if !seen[v] {
+				seen[v] = true
+				ids = append(ids, v)
+			}
+		}
+	}
+	f := projection.NewEditedFrontier(ids)
+	for _, e := range edges {
+		f.Edges[e.ID] = e
+	}
+	return f
+}
+
+func edge(name string, typ ontology.EdgeType, from, to string) graph.Edge {
+	return graph.Edge{ID: eid(name), Type: typ, From: vid(from), To: vid(to)}
+}
+
+// Only the left side changed an edge → take left, no conflict; merged carries it.
+func TestMergeThreeWayEdgeOnlyLeftChanged(t *testing.T) {
+	ctx := context.Background()
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	base := edge("e", ontology.DerivedFrom, "a", "b")
+	changed := base
+	changed.Attrs = graph.AttrMap{"note": "left"}
+
+	ancestor := edgedFrontier(base)
+	left := edgedFrontier(changed) // changed attrs
+	right := edgedFrontier(base)   // unchanged
+
+	mr, err := threeWayEngine(t).MergeThreeWay(ctx, g, ancestor, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mr.Conflicts) != 0 {
+		t.Fatalf("expected no conflicts, got %v", mr.Conflicts)
+	}
+	ed := mr.Frontier.(*projection.EditedFrontier)
+	if got := ed.Edges[base.ID].Attrs["note"]; got != "left" {
+		t.Fatalf("expected left's edge change to win, got %v", got)
+	}
+}
+
+// Both sides changed the same edge differently → Structural conflict.
+func TestMergeThreeWayEdgeModifyModify(t *testing.T) {
+	ctx := context.Background()
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	base := edge("e", ontology.DerivedFrom, "a", "b")
+	l := base
+	l.To = vid("c")
+	r := base
+	r.To = vid("d")
+
+	mr, err := threeWayEngine(t).MergeThreeWay(ctx, g, edgedFrontier(base), edgedFrontier(l), edgedFrontier(r), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mr.Frontier != nil {
+		t.Fatal("edge modify/modify must not produce a merged frontier")
+	}
+	if len(mr.Conflicts) != 1 || mr.Conflicts[0].Kind() != composition.Structural {
+		t.Fatalf("expected one Structural edge conflict, got %+v", mr.Conflicts)
+	}
+}
+
+// An edge added only on the left is included.
+func TestMergeThreeWayEdgeAddition(t *testing.T) {
+	ctx := context.Background()
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	added := edge("e-add", ontology.DerivedFrom, "a", "b")
+
+	mr, err := threeWayEngine(t).MergeThreeWay(ctx, g, edgedFrontier(), edgedFrontier(added), edgedFrontier(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mr.Conflicts) != 0 {
+		t.Fatalf("edge addition should not conflict, got %v", mr.Conflicts)
+	}
+	ed := mr.Frontier.(*projection.EditedFrontier)
+	if _, ok := ed.Edges[added.ID]; !ok {
+		t.Fatal("expected the added edge in the merged frontier")
+	}
+}
+
+// Edge deleted on one side, unchanged on the other → deletion honored.
+func TestMergeThreeWayEdgeDeletionHonored(t *testing.T) {
+	ctx := context.Background()
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	e := edge("e", ontology.DerivedFrom, "a", "b")
+
+	mr, err := threeWayEngine(t).MergeThreeWay(ctx, g, edgedFrontier(e), edgedFrontier(), edgedFrontier(e), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mr.Conflicts) != 0 {
+		t.Fatalf("honored edge deletion should not conflict, got %v", mr.Conflicts)
+	}
+	ed := mr.Frontier.(*projection.EditedFrontier)
+	if _, ok := ed.Edges[e.ID]; ok {
+		t.Fatal("deleted edge must not reappear")
+	}
+}
+
+// Edge deleted on one side, modified on the other → Structural modify/delete.
+func TestMergeThreeWayEdgeModifyDelete(t *testing.T) {
+	ctx := context.Background()
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	base := edge("e", ontology.DerivedFrom, "a", "b")
+	modified := base
+	modified.To = vid("c")
+
+	mr, err := threeWayEngine(t).MergeThreeWay(ctx, g, edgedFrontier(base), edgedFrontier(), edgedFrontier(modified), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mr.Frontier != nil {
+		t.Fatal("edge modify/delete must not produce a merged frontier")
+	}
+	if len(mr.Conflicts) != 1 || mr.Conflicts[0].Kind() != composition.Structural {
+		t.Fatalf("expected one Structural modify/delete conflict, got %+v", mr.Conflicts)
+	}
+}
