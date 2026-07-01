@@ -243,7 +243,12 @@ not call `Add*` from multiple goroutines without external
 synchronization. The `namespace.Store` interface takes `context.Context`
 because remote backings are anticipated; the default `mem.go`
 implementation is not safe for concurrent writes (an in-memory map
-without a mutex). Wrap with a mutex if you need concurrent writers.
+without a mutex). Wrap with a mutex if you need concurrent writers, or
+use `namespace.FileStore` (`file.go`), the durable JSON-backed Store
+that guards every method with a mutex and flushes each bind to disk with
+an atomic write-then-rename — safe for concurrent writers and persistent
+across restarts (UC-S22). Only the namespace is persisted; the graph is
+content-addressed and reconstructable.
 
 ## Where to read next
 
