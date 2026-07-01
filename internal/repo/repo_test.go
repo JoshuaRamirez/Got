@@ -450,3 +450,54 @@ func TestErrThreeWayUnsupportedSentinel(t *testing.T) {
 		t.Fatal("sentinel must match itself")
 	}
 }
+
+// --- UC-S21 / Strict-on-Release ---
+
+// ReleaseStrict blocks a frontier with a malformed TimeTriple that plain
+// Release would let through.
+func TestReleaseStrictBlocksOnTemporal(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	bad := graph.Vertex{ID: vid("rs-bad"), Type: ontology.Artifact, Time: graph.TimeTriple{ValidFrom: 500, ValidTo: 100}}
+	state, err := svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{bad}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := projection.NewEditedFrontier([]identity.VertexID{bad.ID})
+
+	// Plain Release lets it through (no audit).
+	if _, err := svc.Release(ctx, state, f, nil); err != nil {
+		t.Fatalf("plain Release should not audit; got %v", err)
+	}
+	// ReleaseStrict blocks it.
+	if _, err := svc.ReleaseStrict(ctx, state, f, nil); !errors.Is(err, repo.ErrReleaseAudit) {
+		t.Fatalf("expected ErrReleaseAudit, got %v", err)
+	}
+}
+
+// ReleaseStrict allows a clean frontier through the audit and the gate.
+func TestReleaseStrictAllowsClean(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	ok := graph.Vertex{ID: vid("rs-ok"), Type: ontology.Artifact}
+	state, err := svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{ok}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := projection.NewEditedFrontier([]identity.VertexID{ok.ID})
+	if _, err := svc.ReleaseStrict(ctx, state, f, nil); err != nil {
+		t.Fatalf("clean frontier should pass ReleaseStrict, got %v", err)
+	}
+}
+
+func TestReleaseAuditSentinels(t *testing.T) {
+	for _, e := range []error{repo.ErrReleaseAudit, repo.ErrAuditUnsupported} {
+		if !errors.Is(e, e) {
+			t.Fatal("sentinel must match itself")
+		}
+	}
+}

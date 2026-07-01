@@ -652,3 +652,55 @@ func TestStrictMergeAuditShortCircuitsGate(t *testing.T) {
 		t.Fatal("expected at least the Temporal audit conflict")
 	}
 }
+
+// --- Audit capability (UC-S21) ---
+
+func TestAuditorCapability(t *testing.T) {
+	var e composition.Engine = func() composition.Engine { e, _, _ := newEngines(t); return e }()
+	if _, ok := e.(composition.Auditor); !ok {
+		t.Fatal("*DefaultEngine should satisfy composition.Auditor")
+	}
+}
+
+// Audit flags a malformed TimeTriple (ValidTo < ValidFrom) as a Temporal
+// conflict.
+func TestAuditDetectsTemporal(t *testing.T) {
+	ctx := context.Background()
+	e, pe, _ := newEngines(t)
+	bad := vid("audit-bad")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: bad, Type: ontology.Artifact, Time: graph.TimeTriple{ValidFrom: 500, ValidTo: 100}})
+	f := makeFrontier(t, pe, g, bad)
+
+	conflicts, err := e.Audit(ctx, g, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range conflicts {
+		if c.Kind() == composition.Temporal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a Temporal conflict, got %v", conflicts)
+	}
+}
+
+// Audit passes a well-formed frontier.
+func TestAuditClean(t *testing.T) {
+	ctx := context.Background()
+	e, pe, _ := newEngines(t)
+	ok := vid("audit-ok")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: ok, Type: ontology.Artifact})
+	f := makeFrontier(t, pe, g, ok)
+
+	conflicts, err := e.Audit(ctx, g, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("expected clean audit, got %v", conflicts)
+	}
+}

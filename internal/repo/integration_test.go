@@ -303,6 +303,13 @@ func TestIntegrationTemporalConflictSurfaceArea(t *testing.T) {
 	if err != nil {
 		t.Errorf("release does not audit Strict; expected success, got %v", err)
 	}
+
+	// ReleaseStrict DOES run the audit, closing the seam: the same
+	// malformed TimeTriple that plain Release accepts is refused here with
+	// repo.ErrReleaseAudit.
+	if _, err := svc.ReleaseStrict(ctx, state, f, nil); !errors.Is(err, repo.ErrReleaseAudit) {
+		t.Errorf("ReleaseStrict should refuse the malformed frontier; got %v", err)
+	}
 }
 
 // --- Scenario 6: evaluate-certify-merge composition ---
