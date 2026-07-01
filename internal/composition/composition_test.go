@@ -704,3 +704,90 @@ func TestAuditClean(t *testing.T) {
 		t.Fatalf("expected clean audit, got %v", conflicts)
 	}
 }
+
+// --- Capability / Evaluation per-side conflicts (PR C) ---
+
+// Two Evaluation-typed vertices disagreeing on an attr → Evaluation conflict,
+// not Textual, and it carries an EvaluationPayload.
+func TestStrictPerSideEvaluationConflict(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-eval")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Evaluation})
+
+	e, _ := newStrictEngines(t)
+	left := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Evaluation, Attrs: graph.AttrMap{"score": "0.9"}})
+	right := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Evaluation, Attrs: graph.AttrMap{"score": "0.4"}})
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Evaluation) {
+		t.Fatalf("expected Evaluation conflict, got %v", mr.Conflicts)
+	}
+	if hasKind(mr.Conflicts, composition.Textual) {
+		t.Fatalf("Evaluation-typed disagreement should not also be Textual: %v", mr.Conflicts)
+	}
+	// Payload is typed.
+	for _, c := range mr.Conflicts {
+		if c.Kind() != composition.Evaluation {
+			continue
+		}
+		pl, ok := c.(composition.Payloaded)
+		if !ok {
+			t.Fatal("Evaluation conflict should be Payloaded")
+		}
+		p, ok := pl.Payload().(composition.EvaluationPayload)
+		if !ok {
+			t.Fatalf("expected EvaluationPayload, got %T", pl.Payload())
+		}
+		if p.Key != "score" || p.Left != "0.9" || p.Right != "0.4" {
+			t.Fatalf("unexpected EvaluationPayload %+v", p)
+		}
+	}
+}
+
+// Two Capability-typed vertices disagreeing on an attr → Capability conflict.
+func TestStrictPerSideCapabilityConflict(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-cap")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Capability})
+
+	e, _ := newStrictEngines(t)
+	left := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Capability, Attrs: graph.AttrMap{"status": "emergent"}})
+	right := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Capability, Attrs: graph.AttrMap{"status": "absent"}})
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Capability) {
+		t.Fatalf("expected Capability conflict, got %v", mr.Conflicts)
+	}
+	if hasKind(mr.Conflicts, composition.Textual) {
+		t.Fatalf("Capability-typed disagreement should not also be Textual: %v", mr.Conflicts)
+	}
+}
+
+// A non-Evaluation/Capability vertex (Artifact) still yields Textual, so the
+// classification is scoped to the two semantic types.
+func TestStrictPerSideAttrStaysTextualForArtifact(t *testing.T) {
+	ctx := context.Background()
+	id := vid("ps-artifact-attr")
+	g := graph.NewGraph(ontology.NewDefaultSchema())
+	g, _ = g.WithVertex(graph.Vertex{ID: id, Type: ontology.Artifact})
+
+	e, _ := newStrictEngines(t)
+	left := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Artifact, Attrs: graph.AttrMap{"k": "a"}})
+	right := mkEditedFrontier(t, graph.Vertex{ID: id, Type: ontology.Artifact, Attrs: graph.AttrMap{"k": "b"}})
+
+	mr, err := e.Merge(ctx, g, left, right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKind(mr.Conflicts, composition.Textual) {
+		t.Fatalf("Artifact attr disagreement should stay Textual, got %v", mr.Conflicts)
+	}
+}

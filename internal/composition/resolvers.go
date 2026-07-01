@@ -65,6 +65,27 @@ type StructuralPayload struct {
 	RightType ontology.EdgeType
 }
 
+// CapabilityPayload carries a per-key Attrs disagreement on a
+// Capability-typed vertex — the two branches define the capability
+// differently. Structurally identical to TextualPayload but tagged with
+// the Capability kind so resolvers can route on semantics.
+type CapabilityPayload struct {
+	Vertex identity.VertexID
+	Key    string
+	Left   any
+	Right  any
+}
+
+// EvaluationPayload carries a per-key Attrs disagreement on an
+// Evaluation-typed vertex — the two branches disagree on an evaluation
+// result. Tagged with the Evaluation kind.
+type EvaluationPayload struct {
+	Vertex identity.VertexID
+	Key    string
+	Left   any
+	Right  any
+}
+
 // --- Resolver framework ---
 
 // Resolver is a typed conflict handler. AppliesTo names the

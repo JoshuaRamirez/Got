@@ -33,6 +33,8 @@
 
 - **1c. Pullback yields incompatible structure:**
   - 1c1. System constructs a typed `Conflict` (kind: `Structural` or `Schema`) and returns it in `MergeResult.Conflicts`.
+- **1d. Per-side disagreement on an Evaluation- or Capability-typed vertex:**
+  - 1d1. When both `Edited` frontiers carry the same vertex ID with the same type but disagreeing attributes, and that type is `Evaluation` or `Capability`, System emits an `Evaluation` or `Capability` conflict (with an `EvaluationPayload` / `CapabilityPayload`) rather than a generic `Textual` conflict. Disagreements on other vertex types stay `Textual`.
 - **2a. Pushout would violate schema admissibility:**
   - 2a1. System returns a `Schema`-kind conflict.
 - **3a. Policy aggregate is `Unsat`:**
