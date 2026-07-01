@@ -81,6 +81,7 @@ When a UC is retired:
 | [UC-S19](system/UC-S19-check-replay-feasibility.md) | Check whether a change capsule is replayable | Verified | `internal/revision/engine.go` (`Replayable`) | `internal/revision/revision_test.go` | 2026-05-05 | Happy path, empty capsule, consumed-missing, produced-missing failure paths covered. |
 | [UC-S20](system/UC-S20-check-temporal-validity.md) | Check the temporal validity of a vertex | Verified | `internal/temporal/engine.go` (`Validity`) | `internal/temporal/temporal_test.go` | 2026-05-05 | Main path, malformed-triple and unknown-vertex failure paths covered. |
 | [UC-S21](system/UC-S21-audit-frontier-wellformedness.md) | Audit a frontier for structural and temporal well-formedness | Verified | `internal/composition/audit.go` (`DefaultEngine.Audit`, `Auditor`); consumer `internal/repo/service.go` (`ReleaseStrict`) | `internal/composition/composition_test.go`, `internal/repo/repo_test.go`, `internal/repo/integration_test.go` | 2026-06-16 | In-graph structural/temporal audit exposed independently of Merge; strictness-independent. Auditor capability assertion, temporal-detect and clean paths covered. repo.Service.ReleaseStrict runs it before the gate (closes the seam in TestIntegrationTemporalConflictSurfaceArea): blocks a malformed TimeTriple with ErrReleaseAudit that plain Release accepts; clean frontier passes; ErrAuditUnsupported when the engine is not an Auditor. |
+| [UC-S22](system/UC-S22-persist-namespace.md) | Persist namespace bindings to durable storage | Verified | `internal/namespace/file.go` (`FileStore`) | `internal/namespace/file_test.go` | 2026-06-16 | Durable, concurrency-safe Store backed by an atomic JSON file. All three name kinds bind/resolve; durability across reopen; rebind-overwrite; corrupt-file error; unbound; 16-goroutine concurrent-writer test under -race. Only the mutable namespace is persisted (graph is content-addressed/reconstructable). |
 
 ## Summary
 
@@ -89,13 +90,13 @@ As of 2026-06-16:
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
 | User | 0 | 0 | 0 | 19 | 0 | 19 |
-| System | 0 | 0 | 0 | 21 | 0 | 21 |
-| **Total** | **0** | **0** | **0** | **40** | **0** | **40** |
+| System | 0 | 0 | 0 | 22 | 0 | 22 |
+| **Total** | **0** | **0** | **0** | **41** | **0** | **41** |
 
-**Verified coverage: 40 / 40 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 41 / 41 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
-Strict-on-Release) added 2026-06-16. All roadmap phases complete (see
-`roadmap.md`). Every public method on every internal `Engine` and
+Strict-on-Release) and UC-S22 (durable `FileStore` namespace) added
+2026-06-16. All roadmap phases complete (see `roadmap.md`). Every public method on every internal `Engine` and
 `Service` is reachable from at least one user use case and exercised by
 at least one system use case, with behavioral tests covering the main
 success path and at least one failure path per extension group.
