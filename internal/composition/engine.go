@@ -8,6 +8,7 @@ import (
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
+	"github.com/joshuaramirez/got/internal/ontology"
 	"github.com/joshuaramirez/got/internal/projection"
 	"github.com/joshuaramirez/got/internal/verification"
 )
@@ -286,12 +287,7 @@ func perSideAudit(left, right projection.Frontier, eq AttrsEqualFunc) []Conflict
 		}
 		for k, lval := range lv.Attrs {
 			if rval, ok := rv.Attrs[k]; ok && !eq(lval, rval) {
-				conflicts = append(conflicts, auditConflict{
-					kind:     Textual,
-					boundary: []identity.VertexID{id},
-					detail:   fmt.Sprintf("attr %q: %v vs %v", k, lval, rval),
-					payload:  TextualPayload{Vertex: id, Key: k, Left: lval, Right: rval},
-				})
+				conflicts = append(conflicts, attrConflict(id, lv.Type, rv.Type, k, lval, rval))
 			}
 		}
 	}
@@ -317,6 +313,33 @@ func perSideAudit(left, right projection.Frontier, eq AttrsEqualFunc) []Conflict
 	}
 
 	return conflicts
+}
+
+// attrConflict classifies a per-key Attrs disagreement on a vertex. When
+// both sides agree on the vertex type and that type is semantically
+// Evaluation or Capability, the conflict is tagged with the matching
+// ConflictKind (and a typed payload) rather than the generic Textual —
+// so a disagreement over an evaluation result or a capability definition
+// surfaces as such. Type-divergent vertices already produce a Schema
+// conflict elsewhere in the audit, so their attr diffs stay Textual.
+func attrConflict(id identity.VertexID, lt, rt ontology.VertexType, key string, l, r any) Conflict {
+	base := func(kind ConflictKind, payload any) auditConflict {
+		return auditConflict{
+			kind:     kind,
+			boundary: []identity.VertexID{id},
+			detail:   fmt.Sprintf("attr %q: %v vs %v", key, l, r),
+			payload:  payload,
+		}
+	}
+	if lt == rt {
+		switch lt {
+		case ontology.Evaluation:
+			return base(Evaluation, EvaluationPayload{Vertex: id, Key: key, Left: l, Right: r})
+		case ontology.Capability:
+			return base(Capability, CapabilityPayload{Vertex: id, Key: key, Left: l, Right: r})
+		}
+	}
+	return base(Textual, TextualPayload{Vertex: id, Key: key, Left: l, Right: r})
 }
 
 // attrsEqual is the conservative default equivalence for AttrMap values.
