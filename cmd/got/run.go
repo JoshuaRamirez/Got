@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/joshuaramirez/got/internal/composition"
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
+	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/ontology"
 	"github.com/joshuaramirez/got/internal/projection"
 	"github.com/joshuaramirez/got/internal/provenance"
@@ -40,6 +42,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdResolve(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
+	case "merge":
+		return cmdMerge(rest, stdout, stderr)
+	case "merge3":
+		return cmdMerge3(rest, stdout, stderr)
+	case "materialize":
+		return cmdMaterialize(rest, stdout, stderr)
 	case "trace":
 		return cmdTrace(rest, stdout, stderr)
 	case "cone":
@@ -64,6 +72,9 @@ usage:
   got bind <ref> <vertex>
   got resolve <ref>
   got list vertices|edges
+  got merge <listA> <listB>              (comma-separated vertex names)
+  got merge3 <ancestor> <left> <right>   (three-way, comma-separated lists)
+  got materialize                        (manifest bundle of the whole graph)
   got trace <from> <to>
   got cone <name>
 
@@ -313,6 +324,158 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 	sort.Slice(edges, func(i, j int) bool { return edges[i].Name < edges[j].Name })
 	for _, e := range edges {
 		fmt.Fprintf(stdout, "%s\t%s -%s-> %s\n", e.Name, e.From, e.Type, e.To)
+	}
+	return 0
+}
+
+func cmdMerge(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 2 {
+		fmt.Fprintln(stderr, "merge: expected <listA> <listB> (comma-separated vertex names)")
+		return 2
+	}
+	snap, err := loadSnapshot()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	state, err := snap.buildState()
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	left, err := frontierFromList(snap, args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	right, err := frontierFromList(snap, args[1])
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	_, mr, err := newService().Merge(context.Background(), state, left, right, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	return printMergeResult(stdout, snap, mr)
+}
+
+func cmdMerge3(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 3 {
+		fmt.Fprintln(stderr, "merge3: expected <ancestor> <left> <right> (comma-separated vertex names)")
+		return 2
+	}
+	snap, err := loadSnapshot()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	state, err := snap.buildState()
+	if err != nil {
+		fmt.Fprintf(stderr, "merge3: %v\n", err)
+		return 1
+	}
+	ancestor, err := frontierFromList(snap, args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "merge3: %v\n", err)
+		return 1
+	}
+	left, err := frontierFromList(snap, args[1])
+	if err != nil {
+		fmt.Fprintf(stderr, "merge3: %v\n", err)
+		return 1
+	}
+	right, err := frontierFromList(snap, args[2])
+	if err != nil {
+		fmt.Fprintf(stderr, "merge3: %v\n", err)
+		return 1
+	}
+	_, mr, err := newService().MergeThreeWay(context.Background(), state, ancestor, left, right, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "merge3: %v\n", err)
+		return 1
+	}
+	return printMergeResult(stdout, snap, mr)
+}
+
+func cmdMaterialize(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "materialize: takes no arguments")
+		return 2
+	}
+	snap, err := loadSnapshot()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	state, err := snap.buildState()
+	if err != nil {
+		fmt.Fprintf(stderr, "materialize: %v\n", err)
+		return 1
+	}
+	ids := make([]identity.VertexID, 0, len(snap.Vertices))
+	for _, v := range snap.Vertices {
+		ids = append(ids, vid(v.Name))
+	}
+	bundle, err := newService().Materialize(context.Background(), state, projection.InduceSpec{IDs: ids}, realization.ManifestTarget)
+	if err != nil {
+		fmt.Fprintf(stderr, "materialize: %v\n", err)
+		return 1
+	}
+	paths := bundle.Paths()
+	sort.Strings(paths)
+	fmt.Fprintf(stdout, "bundle target=%s, %d path(s)\n", bundle.Target(), len(paths))
+	for _, p := range paths {
+		fmt.Fprintf(stdout, "  %s\n", p)
+	}
+	return 0
+}
+
+// frontierFromList parses a comma-separated list of vertex names into a
+// frontier, erroring on any unknown name. The frontier is an EditedFrontier
+// carrying IDs only; three-way content therefore comes from the host graph
+// (presence-only reconciliation).
+func frontierFromList(snap *snapshot, csv string) (projection.Frontier, error) {
+	names := splitCSV(csv)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("empty vertex list")
+	}
+	ids := make([]identity.VertexID, 0, len(names))
+	for _, name := range names {
+		if _, ok := snap.vertexByName(name); !ok {
+			return nil, fmt.Errorf("unknown vertex %q", name)
+		}
+		ids = append(ids, vid(name))
+	}
+	return projection.NewEditedFrontier(ids), nil
+}
+
+// printMergeResult renders a MergeResult: the merged vertex names + witness on
+// success, or the typed conflicts on failure. Returns the process exit code.
+func printMergeResult(stdout io.Writer, snap *snapshot, mr composition.MergeResult) int {
+	idx := snap.nameIndex()
+	if mr.Frontier != nil {
+		names := make([]string, 0)
+		for _, id := range mr.Frontier.VertexIDs() {
+			if n, ok := idx[id]; ok {
+				names = append(names, n)
+			} else {
+				names = append(names, shortID(id[:]))
+			}
+		}
+		sort.Strings(names)
+		fmt.Fprintf(stdout, "merged %d vertex(es): %s\n", len(names), strings.Join(names, ", "))
+		fmt.Fprintf(stdout, "witness: %s\n", shortID(mr.Witness.ID[:]))
+		return 0
+	}
+	fmt.Fprintf(stdout, "%d conflict(s):\n", len(mr.Conflicts))
+	for _, c := range mr.Conflicts {
+		if d, ok := c.(interface{ Detail() string }); ok {
+			fmt.Fprintf(stdout, "  %s: %s\n", c.Kind(), d.Detail())
+		} else {
+			fmt.Fprintf(stdout, "  %s\n", c.Kind())
+		}
 	}
 	return 0
 }

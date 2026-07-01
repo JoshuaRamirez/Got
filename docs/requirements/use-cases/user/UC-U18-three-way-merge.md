@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Goal level | User goal (sea) |
-| Scope | `composition.Engine` (via `composition.DefaultEngine.MergeThreeWay`) |
+| Scope | `composition.Engine` (via `composition.DefaultEngine.MergeThreeWay`), reachable through `repo.Service.MergeThreeWay` |
 | Primary actor | Integrator |
 | Stakeholders & interests | Integrator: combine two divergent frontiers without losing either side's intentional changes, and be told precisely where the sides genuinely conflict. Auditor: a deletion on one branch must not be silently undone by the other branch. |
 | Preconditions | Three frontiers are supplied — a common `ancestor` and two descendants `left` and `right` — over a host graph `g`. To detect content-level (modify/modify) divergence the frontiers must carry per-side content (`projection.Edited`); plain ID frontiers yield presence-only three-way semantics. |
@@ -54,6 +54,7 @@
 
 ## Related use cases
 
+- Facade: `repo.Service.MergeThreeWay` delegates to the composition engine when it satisfies `composition.ThreeWayMerger` (the default engine does); otherwise it returns `repo.ErrThreeWayUnsupported`.
 - Extends: UC-U04 (Merge two frontiers) — three-way merge adds ancestor-relative reconciliation on top of the two-way union.
 - Includes: UC-S03 (guarded pushout gate), UC-S06 (issue certificate), UC-S12 (policy aggregate).
 - Resolution path: UC-U17 (Resolve merge conflicts), UC-S04 (apply conflict resolutions).

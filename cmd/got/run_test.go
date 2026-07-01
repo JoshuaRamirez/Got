@@ -228,3 +228,57 @@ func TestPersistenceAcrossInvocations(t *testing.T) {
 		t.Fatalf("expected persisted vertex across invocations, got %q", out)
 	}
 }
+
+// --- merge / merge3 / materialize ---
+
+func TestMergeCommand(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	code, out, errs := runCLI(t, "merge", "a", "b")
+	if code != 0 {
+		t.Fatalf("merge failed: %s", errs)
+	}
+	if !strings.Contains(out, "merged 2 vertex(es)") || !strings.Contains(out, "a, b") {
+		t.Fatalf("expected merged union of a,b, got %q", out)
+	}
+	if !strings.Contains(out, "witness:") {
+		t.Fatalf("expected a witness line, got %q", out)
+	}
+}
+
+func TestMergeUnknownVertex(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	code, _, errs := runCLI(t, "merge", "a", "ghost")
+	if code != 1 || !strings.Contains(errs, "unknown vertex") {
+		t.Fatalf("expected unknown-vertex error, code=%d err=%q", code, errs)
+	}
+}
+
+// merge3 honors a one-sided deletion: art deleted on left, unchanged on right.
+func TestMerge3HonorsDeletion(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "exec", "--type", "Execution")
+	runCLI(t, "add-vertex", "art", "--type", "Artifact")
+	code, out, errs := runCLI(t, "merge3", "exec,art", "exec", "exec,art")
+	if code != 0 {
+		t.Fatalf("merge3 failed: %s", errs)
+	}
+	if !strings.Contains(out, "merged 1 vertex(es): exec") {
+		t.Fatalf("expected deletion of art honored (merged={exec}), got %q", out)
+	}
+}
+
+func TestMaterializeCommand(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	code, out, errs := runCLI(t, "materialize")
+	if code != 0 {
+		t.Fatalf("materialize failed: %s", errs)
+	}
+	if !strings.Contains(out, "target=manifest") || !strings.Contains(out, "2 path(s)") {
+		t.Fatalf("expected a 2-path manifest bundle, got %q", out)
+	}
+}
