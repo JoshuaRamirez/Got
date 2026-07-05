@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/joshuaramirez/got/internal/composition"
@@ -499,5 +501,112 @@ func TestReleaseAuditSentinels(t *testing.T) {
 		if !errors.Is(e, e) {
 			t.Fatal("sentinel must match itself")
 		}
+	}
+}
+
+// --- UC-U20: repository directory persistence ---
+
+// SaveState then LoadState round-trips the graph and namespace across a
+// simulated restart, driven through the facade.
+func TestSaveLoadStateRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	schema := ontology.NewDefaultSchema()
+
+	// Fresh repo: ingest two vertices + an admissible edge, bind a ref.
+	svc := newService(t)
+	state, err := repo.LoadState(dir, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := graph.Vertex{ID: vid("p-exec"), Type: ontology.Execution}
+	art := graph.Vertex{ID: vid("p-art"), Type: ontology.Artifact}
+	state, err = svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{exec, art}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = svc.Ingest(ctx, state, repo.EdgePayload{Edges: []graph.Edge{
+		{ID: eid("p-e"), Type: ontology.Materializes, From: exec.ID, To: art.ID},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Bind a ref through the facade (namespace flushes on its own).
+	if _, err := svc.Branch(ctx, state, "main", art.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Persist the graph value.
+	if err := repo.SaveState(dir, state); err != nil {
+		t.Fatal(err)
+	}
+
+	// "Restart": load a fresh State from the same directory.
+	reloaded, err := repo.LoadState(dir, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reloaded.Graph().Vertex(exec.ID); !ok {
+		t.Fatal("exec vertex did not survive save/load")
+	}
+	if _, ok := reloaded.Graph().Edge(eid("p-e")); !ok {
+		t.Fatal("edge did not survive save/load")
+	}
+	if got, ok := reloaded.Namespace().ResolveRef(ctx, "main"); !ok || got != art.ID {
+		t.Fatalf("ref 'main' did not survive save/load: got %v ok=%v", got, ok)
+	}
+}
+
+// LoadState on an empty directory yields an empty, usable repository.
+func TestLoadStateEmptyDir(t *testing.T) {
+	state, err := repo.LoadState(t.TempDir(), ontology.NewDefaultSchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Graph().VertexIDs()) != 0 {
+		t.Fatal("empty dir should load an empty graph")
+	}
+	if _, ok := state.Namespace().ResolveRef(context.Background(), "x"); ok {
+		t.Fatal("empty dir should have no bindings")
+	}
+}
+
+// A later SaveState overwrites the graph file so LoadState sees the newest
+// graph value.
+func TestSaveStateOverwritesGraph(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	schema := ontology.NewDefaultSchema()
+	svc := newService(t)
+
+	state, _ := repo.LoadState(dir, schema)
+	state, err := svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{{ID: vid("v1"), Type: ontology.Artifact}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveState(dir, state); err != nil {
+		t.Fatal(err)
+	}
+	state, err = svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{{ID: vid("v2"), Type: ontology.Artifact}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveState(dir, state); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, _ := repo.LoadState(dir, schema)
+	if len(reloaded.Graph().VertexIDs()) != 2 {
+		t.Fatalf("expected 2 vertices after second save, got %d", len(reloaded.Graph().VertexIDs()))
+	}
+}
+
+// A corrupt graph file is rejected on load.
+func TestLoadStateCorruptGraph(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "graph.json"), []byte("{bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.LoadState(dir, ontology.NewDefaultSchema()); err == nil {
+		t.Fatal("expected error loading corrupt graph file")
 	}
 }

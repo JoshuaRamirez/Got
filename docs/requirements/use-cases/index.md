@@ -26,6 +26,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U17](user/UC-U17-resolve-merge-conflicts.md) | Resolve merge conflicts | Integrator | `repo.Service`, `composition.Engine` |
 | [UC-U18](user/UC-U18-three-way-merge.md) | Three-way merge against a common ancestor | Integrator | `composition.Engine` |
 | [UC-U19](user/UC-U19-operate-from-cli.md) | Operate the repository from the command line | Operator | `cmd/got` |
+| [UC-U20](user/UC-U20-persist-reload-repository.md) | Persist and reload a repository | Repository host | `repo` |
 
 ## System use cases (sub-function level)
 
