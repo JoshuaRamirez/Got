@@ -120,9 +120,19 @@ func (g *memGraph) Induce(ids []identity.VertexID) (Subgraph, error) {
 	return &memSubgraph{ids: ids, verts: vs, edges: es, hypers: hs}, nil
 }
 
-// Query is a placeholder; no concrete query types are defined yet.
-func (g *memGraph) Query(_ Query) (Subgraph, error) {
-	return nil, ErrQueryUnsupported
+// Query evaluates a Query against the graph and returns the induced subgraph
+// on the matching vertices (see query.go for the query types). An unknown
+// query type yields ErrQueryUnsupported.
+func (g *memGraph) Query(q Query) (Subgraph, error) {
+	matched, err := matchVertices(g, q)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]identity.VertexID, 0, len(matched))
+	for id := range matched {
+		ids = append(ids, id)
+	}
+	return g.Induce(ids)
 }
 
 // WithVertex returns a new graph containing all elements of g plus v.

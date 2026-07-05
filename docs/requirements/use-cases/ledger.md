@@ -45,7 +45,7 @@ When a UC is retired:
 | [UC-U07](user/UC-U07-promote-release.md) | Promote a frontier to a release alias | Verified | `internal/release/service.go` (`Promote`) | `internal/release/release_test.go` | 2026-05-05 | Happy path + empty-frontier, nil-certificate, target-mismatch failure paths covered. Trusts the supplied certificate's gate decision. |
 | [UC-U08](user/UC-U08-rollback-release.md) | Rollback a release alias | Verified | `internal/release/service.go` (`Rollback`) | `internal/release/release_test.go` | 2026-05-05 | Two-version Promote/Rollback cycle and ErrUnknownVersion failure path covered. In-memory ledger keyed by (alias, version). |
 | [UC-U09](user/UC-U09-resolve-name.md) | Resolve a name to a vertex | Verified | `internal/namespace/mem.go` | `internal/namespace/namespace_test.go` | 2026-05-05 | Main path + unbound-name failure path covered. |
-| [UC-U10](user/UC-U10-query-graph.md) | Query the graph | Verified | `internal/graph/mem.go` | `internal/graph/graph_test.go` | 2026-05-05 | `Vertex`/`Edge`/`Hyperedge`/`VertexIDs`/`Induce` covered; `Query` returns `ErrQueryUnsupported` (covered). |
+| [UC-U10](user/UC-U10-query-graph.md) | Query the graph | Verified | `internal/graph/mem.go`, `internal/graph/query.go` | `internal/graph/graph_test.go`, `internal/graph/query_test.go` | 2026-06-16 | `Vertex`/`Edge`/`Hyperedge`/`VertexIDs`/`Induce` covered. `Query` now evaluates a composable query language (ByType, ByAttr, And, Or) returning the induced subgraph (UC-S24); unknown query types still return `ErrQueryUnsupported`. |
 | [UC-U11](user/UC-U11-trace-provenance.md) | Trace causal provenance | Verified | `internal/provenance/engine.go` | `internal/provenance/provenance_test.go`, `internal/provenance/provenance_props_test.go` | 2026-06-10 | All four read methods covered including reflexivity, monotonicity, idempotence axioms. Property tests assert extensive/idempotent/monotone closure, Cone=singleton-Close, Close=union-of-cones, Causes symmetry and closure-agreement, and TraceSet simple-path well-formedness across 300 random causal graphs. |
 | [UC-U12](user/UC-U12-trace-authorship.md) | Trace authorship and responsibility | Verified | `internal/multiagent/engine.go` | `internal/multiagent/multiagent_test.go` | 2026-05-05 | Authorship and ResponsibilityTrace covered; ErrNoAuthorship and graph.ErrVertexNotFound failure paths exercised. |
 | [UC-U13](user/UC-U13-check-freshness.md) | Check temporal freshness of a vertex | Verified | `internal/temporal/engine.go` | `internal/temporal/temporal_test.go` | 2026-05-05 | Validity, Fresh half-open semantics, indefinite-`ValidTo`, malformed triple, and unknown-vertex paths covered. |
@@ -85,6 +85,7 @@ When a UC is retired:
 | [UC-S21](system/UC-S21-audit-frontier-wellformedness.md) | Audit a frontier for structural and temporal well-formedness | Verified | `internal/composition/audit.go` (`DefaultEngine.Audit`, `Auditor`); consumer `internal/repo/service.go` (`ReleaseStrict`) | `internal/composition/composition_test.go`, `internal/repo/repo_test.go`, `internal/repo/integration_test.go` | 2026-06-16 | In-graph structural/temporal audit exposed independently of Merge; strictness-independent. Auditor capability assertion, temporal-detect and clean paths covered. repo.Service.ReleaseStrict runs it before the gate (closes the seam in TestIntegrationTemporalConflictSurfaceArea): blocks a malformed TimeTriple with ErrReleaseAudit that plain Release accepts; clean frontier passes; ErrAuditUnsupported when the engine is not an Auditor. |
 | [UC-S22](system/UC-S22-persist-namespace.md) | Persist namespace bindings to durable storage | Verified | `internal/namespace/file.go` (`FileStore`) | `internal/namespace/file_test.go` | 2026-06-16 | Durable, concurrency-safe Store backed by an atomic JSON file. All three name kinds bind/resolve; durability across reopen; rebind-overwrite; corrupt-file error; unbound; 16-goroutine concurrent-writer test under -race. Only the mutable namespace is persisted (graph is content-addressed/reconstructable). |
 | [UC-S23](system/UC-S23-serialize-graph.md) | Serialize and deserialize a graph | Verified | `internal/graph/codec.go` (`EncodeSnapshot`, `Snapshot.Build`, `Marshal`, `Unmarshal`) | `internal/graph/codec_test.go` | 2026-06-16 | Lossless snapshot/JSON codec carrying all vertex/edge/hyperedge fields (hex IDs). Round-trip (incl. attrs/time/trust/edges/hyperedge) and JSON round-trip; empty; validate-on-load runs graph.Validate so malformed-ID, missing-endpoint, and inadmissible snapshots are rejected on decode. |
+| [UC-S24](system/UC-S24-evaluate-graph-query.md) | Evaluate a graph query | Verified | `internal/graph/query.go` (`ByType`, `ByAttr`, `And`, `Or`, `matchVertices`), `internal/graph/mem.go` (`Query`) | `internal/graph/query_test.go` | 2026-06-16 | Composable query language: ByType, ByAttr (deep-equality, absent-key non-match), And (intersection), Or (union), nesting, empty composites, induced-edge inclusion, and ErrQueryUnsupported for unknown types (incl. propagation through composites). |
 
 ## Summary
 
@@ -93,10 +94,10 @@ As of 2026-06-16:
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
 | User | 0 | 0 | 0 | 20 | 0 | 20 |
-| System | 0 | 0 | 0 | 23 | 0 | 23 |
-| **Total** | **0** | **0** | **0** | **43** | **0** | **43** |
+| System | 0 | 0 | 0 | 24 | 0 | 24 |
+| **Total** | **0** | **0** | **0** | **44** | **0** | **44** |
 
-**Verified coverage: 43 / 43 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 44 / 44 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added
