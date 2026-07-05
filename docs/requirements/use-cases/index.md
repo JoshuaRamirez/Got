@@ -56,6 +56,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-S22](system/UC-S22-persist-namespace.md) | Persist namespace bindings to durable storage | `namespace.Store` | `internal/namespace` |
 | [UC-S23](system/UC-S23-serialize-graph.md) | Serialize and deserialize a graph | `graph` codec | `internal/graph` |
 | [UC-S24](system/UC-S24-evaluate-graph-query.md) | Evaluate a graph query | `graph.Graph` | `internal/graph` |
+| [UC-S25](system/UC-S25-remote-namespace.md) | Bind and resolve names over a network | `namespace.Store` | `internal/namespace` |
 
 ## Coverage
 
