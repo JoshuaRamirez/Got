@@ -53,6 +53,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-S20](system/UC-S20-check-temporal-validity.md) | Check the temporal validity of a vertex | `temporal.Engine` | `internal/temporal` |
 | [UC-S21](system/UC-S21-audit-frontier-wellformedness.md) | Audit a frontier for structural and temporal well-formedness | `composition.Engine` | `internal/composition` |
 | [UC-S22](system/UC-S22-persist-namespace.md) | Persist namespace bindings to durable storage | `namespace.Store` | `internal/namespace` |
+| [UC-S23](system/UC-S23-serialize-graph.md) | Serialize and deserialize a graph | `graph` codec | `internal/graph` |
 
 ## Coverage
 
