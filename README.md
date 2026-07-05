@@ -50,6 +50,10 @@ go build -o got ./cmd/got
 Inadmissible edges are rejected by the graph's well-formedness check, so the
 CLI surfaces the same ontology guarantees the library enforces.
 
+State is a repository directory (`repo.SaveState` / `repo.LoadState`): `graph.json`
+(the graph snapshot) plus `namespace.json` (the durable namespace). Human names
+are carried in a reserved `got.name` attribute so they survive the graph codec.
+
 ## Project Structure
 
 ```

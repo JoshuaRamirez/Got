@@ -6,14 +6,14 @@
 | Scope | `cmd/got` (composes `repo.Service`, `namespace.Store`, `provenance.Engine`) |
 | Primary actor | Operator (a human at a shell, or a script) |
 | Stakeholders & interests | Operator: drive the library end-to-end without writing Go. Auditor: a persisted, inspectable repository state file. |
-| Preconditions | A working directory. For every command except `init`, a repository state file exists (created by `init`). |
+| Preconditions | A working directory. For every command except `init`, a repository directory exists (created by `init`, marked by `graph.json`). |
 | Trigger | Operator runs `got <command> [args]`. |
 | Success postcondition | The command performs its operation against the persisted repository, prints a result, persists any state change, and exits 0. |
 | Failure postcondition | The command prints a diagnostic to stderr and exits non-zero. The persisted state is unchanged on a rejected mutation. |
 
 ## Main success scenario
 
-1. Operator runs `got init`, creating an empty repository state file under the state directory (`$GOT_DIR`, default `.got`).
+1. Operator runs `got init`, creating an empty repository directory (`$GOT_DIR`, default `.got`) with a `graph.json`.
 2. Operator runs `got add-vertex <name> --type <VertexType> [--attr k=v ...]`. The CLI loads the state, ingests the vertex through `repo.Service.Ingest` (UC-U01), persists the new state, and confirms.
 3. Operator runs `got add-edge <name> --type <EdgeType> --from <v> --to <v>`. The CLI ingests the edge through `repo.Service.Ingest`; admissibility is enforced by the graph's `Validate` (UC-S01/UC-S18).
 4. Operator runs `got bind <ref> <vertex>` to point a branch ref at a vertex through `repo.Service.Branch` (UC-U03), persisting the binding.
@@ -43,8 +43,8 @@
 
 ## Sub-variations
 
-- **Identity:** a vertex's content-addressed `VertexID` is `sha256(name)`, the same convention the library's tests use; edges and refs reference vertices by name.
-- **Persistence:** repository state is a single JSON file under `$GOT_DIR`. Each mutating command loads, applies through the library, and saves; read commands load and report.
+- **Identity:** a vertex's content-addressed `VertexID` is `sha256(name)`, the same convention the library's tests use; edges and refs reference vertices by name. Because that hash is one-way, the CLI stores the human name in the reserved attribute `got.name` on each vertex and edge, so it survives the graph codec and is recoverable for display after a reload.
+- **Persistence:** repository state is a directory under `$GOT_DIR` holding `graph.json` (the graph, via `repo.SaveState` / UC-S23) and `namespace.json` (the durable namespace, via UC-S22's `FileStore`). Each mutating command loads via `repo.LoadState`, applies through the library, and saves via `repo.SaveState` (graph); ref binds persist immediately through the FileStore. This is UC-U20's persistence composed into the CLI.
 
 ## Related use cases
 

@@ -78,7 +78,8 @@ usage:
   got trace <from> <to>
   got cone <name>
 
-state is persisted as JSON under $GOT_DIR (default .got).
+state is a repository directory under $GOT_DIR (default .got):
+graph.json (the graph) + namespace.json (the durable namespace).
 `)
 }
 
@@ -105,15 +106,22 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if repoExists() {
-		fmt.Fprintf(stdout, "repository already exists at %s\n", statePath())
+	if repoInitialized() {
+		fmt.Fprintf(stdout, "repository already exists at %s\n", stateDir())
 		return 0
 	}
-	if err := saveSnapshot(&snapshot{Refs: map[string]string{}}); err != nil {
+	// Load an empty State (creates a namespace FileStore) and save the empty
+	// graph so graph.json exists and marks the repo initialized.
+	state, err := repo.LoadState(stateDir(), schema())
+	if err != nil {
 		fmt.Fprintf(stderr, "init: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "initialized empty repository at %s\n", statePath())
+	if err := saveState(state); err != nil {
+		fmt.Fprintf(stderr, "init: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "initialized empty repository at %s\n", stateDir())
 	return 0
 }
 
@@ -140,7 +148,7 @@ func cmdAddVertex(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "add-vertex: --type is required")
 		return 2
 	}
-	if !ontology.NewDefaultSchema().KnownVertexType(ontology.VertexType(typ)) {
+	if !schema().KnownVertexType(ontology.VertexType(typ)) {
 		fmt.Fprintf(stderr, "add-vertex: unknown vertex type %q\n", typ)
 		return 1
 	}
@@ -150,32 +158,24 @@ func cmdAddVertex(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if _, ok := snap.vertexByName(name); ok {
+	if _, ok := vertexNamed(state.Graph(), name); ok {
 		fmt.Fprintf(stderr, "add-vertex: vertex %q already exists\n", name)
 		return 1
 	}
 
-	state, err := snap.buildState()
-	if err != nil {
-		fmt.Fprintf(stderr, "add-vertex: %v\n", err)
-		return 1
-	}
-	svc := newService()
-	_, err = svc.Ingest(context.Background(), state, repo.VertexPayload{
-		Vertices: []graph.Vertex{{ID: vid(name), Type: ontology.VertexType(typ), Attrs: attrMap(parsed)}},
+	newState, err := newService().Ingest(context.Background(), state, repo.VertexPayload{
+		Vertices: []graph.Vertex{{ID: vid(name), Type: ontology.VertexType(typ), Attrs: withName(name, parsed)}},
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "add-vertex: %v\n", err)
 		return 1
 	}
-
-	snap.Vertices = append(snap.Vertices, vertexRec{Name: name, Type: typ, Attrs: parsed})
-	if err := saveSnapshot(snap); err != nil {
+	if err := saveState(newState); err != nil {
 		fmt.Fprintf(stderr, "add-vertex: %v\n", err)
 		return 1
 	}
@@ -207,36 +207,28 @@ func cmdAddEdge(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if _, ok := snap.vertexByName(from); !ok {
+	if _, ok := vertexNamed(state.Graph(), from); !ok {
 		fmt.Fprintf(stderr, "add-edge: unknown --from vertex %q\n", from)
 		return 1
 	}
-	if _, ok := snap.vertexByName(to); !ok {
+	if _, ok := vertexNamed(state.Graph(), to); !ok {
 		fmt.Fprintf(stderr, "add-edge: unknown --to vertex %q\n", to)
 		return 1
 	}
 
-	state, err := snap.buildState()
-	if err != nil {
-		fmt.Fprintf(stderr, "add-edge: %v\n", err)
-		return 1
-	}
-	svc := newService()
-	_, err = svc.Ingest(context.Background(), state, repo.EdgePayload{
-		Edges: []graph.Edge{{ID: eid(name), Type: ontology.EdgeType(typ), From: vid(from), To: vid(to)}},
+	newState, err := newService().Ingest(context.Background(), state, repo.EdgePayload{
+		Edges: []graph.Edge{{ID: eid(name), Type: ontology.EdgeType(typ), From: vid(from), To: vid(to), Attrs: withName(name, nil)}},
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "add-edge: %v\n", err)
 		return 1
 	}
-
-	snap.Edges = append(snap.Edges, edgeRec{Name: name, Type: typ, From: from, To: to})
-	if err := saveSnapshot(snap); err != nil {
+	if err := saveState(newState); err != nil {
 		fmt.Fprintf(stderr, "add-edge: %v\n", err)
 		return 1
 	}
@@ -251,24 +243,14 @@ func cmdBind(args []string, stdout, stderr io.Writer) int {
 	}
 	ref, target := args[0], args[1]
 
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	state, err := snap.buildState()
-	if err != nil {
-		fmt.Fprintf(stderr, "bind: %v\n", err)
-		return 1
-	}
-	svc := newService()
-	if _, err := svc.Branch(context.Background(), state, refName(ref), vid(target)); err != nil {
-		fmt.Fprintf(stderr, "bind: %v\n", err)
-		return 1
-	}
-
-	snap.Refs[ref] = target
-	if err := saveSnapshot(snap); err != nil {
+	// Branch checks the vertex exists and binds the ref into the durable
+	// namespace FileStore (persisted immediately; graph is unchanged).
+	if _, err := newService().Branch(context.Background(), state, refName(ref), vid(target)); err != nil {
 		fmt.Fprintf(stderr, "bind: %v\n", err)
 		return 1
 	}
@@ -282,14 +264,9 @@ func cmdResolve(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	ref := args[0]
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	state, err := snap.buildState()
-	if err != nil {
-		fmt.Fprintf(stderr, "resolve: %v\n", err)
 		return 1
 	}
 	id, ok := state.Namespace().ResolveRef(context.Background(), refName(ref))
@@ -297,7 +274,7 @@ func cmdResolve(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "resolve: ref %q is unbound\n", ref)
 		return 1
 	}
-	name := snap.nameIndex()[id]
+	name := nameIndex(state.Graph())[id]
 	fmt.Fprintf(stdout, "%s -> %s (%s)\n", ref, name, shortID(id[:]))
 	return 0
 }
@@ -307,23 +284,25 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "list: expected 'vertices' or 'edges'")
 		return 2
 	}
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	g := state.Graph()
 	if args[0] == "vertices" {
-		verts := append([]vertexRec(nil), snap.Vertices...)
-		sort.Slice(verts, func(i, j int) bool { return verts[i].Name < verts[j].Name })
+		verts := append([]graph.Vertex(nil), g.Vertices()...)
+		sort.Slice(verts, func(i, j int) bool { return nameOf(verts[i]) < nameOf(verts[j]) })
 		for _, v := range verts {
-			fmt.Fprintf(stdout, "%s\t%s\n", v.Name, v.Type)
+			fmt.Fprintf(stdout, "%s\t%s\n", nameOf(v), v.Type)
 		}
 		return 0
 	}
-	edges := append([]edgeRec(nil), snap.Edges...)
-	sort.Slice(edges, func(i, j int) bool { return edges[i].Name < edges[j].Name })
+	idx := nameIndex(g)
+	edges := append([]graph.Edge(nil), g.Edges()...)
+	sort.Slice(edges, func(i, j int) bool { return edgeNameOf(edges[i]) < edgeNameOf(edges[j]) })
 	for _, e := range edges {
-		fmt.Fprintf(stdout, "%s\t%s -%s-> %s\n", e.Name, e.From, e.Type, e.To)
+		fmt.Fprintf(stdout, "%s\t%s -%s-> %s\n", edgeNameOf(e), idx[e.From], e.Type, idx[e.To])
 	}
 	return 0
 }
@@ -333,22 +312,17 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "merge: expected <listA> <listB> (comma-separated vertex names)")
 		return 2
 	}
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	state, err := snap.buildState()
+	left, err := frontierFromList(state.Graph(), args[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "merge: %v\n", err)
 		return 1
 	}
-	left, err := frontierFromList(snap, args[0])
-	if err != nil {
-		fmt.Fprintf(stderr, "merge: %v\n", err)
-		return 1
-	}
-	right, err := frontierFromList(snap, args[1])
+	right, err := frontierFromList(state.Graph(), args[1])
 	if err != nil {
 		fmt.Fprintf(stderr, "merge: %v\n", err)
 		return 1
@@ -358,7 +332,7 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "merge: %v\n", err)
 		return 1
 	}
-	return printMergeResult(stdout, snap, mr)
+	return printMergeResult(stdout, nameIndex(state.Graph()), mr)
 }
 
 func cmdMerge3(args []string, stdout, stderr io.Writer) int {
@@ -366,27 +340,22 @@ func cmdMerge3(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "merge3: expected <ancestor> <left> <right> (comma-separated vertex names)")
 		return 2
 	}
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	state, err := snap.buildState()
+	ancestor, err := frontierFromList(state.Graph(), args[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "merge3: %v\n", err)
 		return 1
 	}
-	ancestor, err := frontierFromList(snap, args[0])
+	left, err := frontierFromList(state.Graph(), args[1])
 	if err != nil {
 		fmt.Fprintf(stderr, "merge3: %v\n", err)
 		return 1
 	}
-	left, err := frontierFromList(snap, args[1])
-	if err != nil {
-		fmt.Fprintf(stderr, "merge3: %v\n", err)
-		return 1
-	}
-	right, err := frontierFromList(snap, args[2])
+	right, err := frontierFromList(state.Graph(), args[2])
 	if err != nil {
 		fmt.Fprintf(stderr, "merge3: %v\n", err)
 		return 1
@@ -396,7 +365,7 @@ func cmdMerge3(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "merge3: %v\n", err)
 		return 1
 	}
-	return printMergeResult(stdout, snap, mr)
+	return printMergeResult(stdout, nameIndex(state.Graph()), mr)
 }
 
 func cmdMaterialize(args []string, stdout, stderr io.Writer) int {
@@ -404,20 +373,12 @@ func cmdMaterialize(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "materialize: takes no arguments")
 		return 2
 	}
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	state, err := snap.buildState()
-	if err != nil {
-		fmt.Fprintf(stderr, "materialize: %v\n", err)
-		return 1
-	}
-	ids := make([]identity.VertexID, 0, len(snap.Vertices))
-	for _, v := range snap.Vertices {
-		ids = append(ids, vid(v.Name))
-	}
+	ids := state.Graph().VertexIDs()
 	bundle, err := newService().Materialize(context.Background(), state, projection.InduceSpec{IDs: ids}, realization.ManifestTarget)
 	if err != nil {
 		fmt.Fprintf(stderr, "materialize: %v\n", err)
@@ -436,14 +397,14 @@ func cmdMaterialize(args []string, stdout, stderr io.Writer) int {
 // frontier, erroring on any unknown name. The frontier is an EditedFrontier
 // carrying IDs only; three-way content therefore comes from the host graph
 // (presence-only reconciliation).
-func frontierFromList(snap *snapshot, csv string) (projection.Frontier, error) {
+func frontierFromList(g graph.Graph, csv string) (projection.Frontier, error) {
 	names := splitCSV(csv)
 	if len(names) == 0 {
 		return nil, fmt.Errorf("empty vertex list")
 	}
 	ids := make([]identity.VertexID, 0, len(names))
 	for _, name := range names {
-		if _, ok := snap.vertexByName(name); !ok {
+		if _, ok := vertexNamed(g, name); !ok {
 			return nil, fmt.Errorf("unknown vertex %q", name)
 		}
 		ids = append(ids, vid(name))
@@ -453,8 +414,7 @@ func frontierFromList(snap *snapshot, csv string) (projection.Frontier, error) {
 
 // printMergeResult renders a MergeResult: the merged vertex names + witness on
 // success, or the typed conflicts on failure. Returns the process exit code.
-func printMergeResult(stdout io.Writer, snap *snapshot, mr composition.MergeResult) int {
-	idx := snap.nameIndex()
+func printMergeResult(stdout io.Writer, idx map[identity.VertexID]string, mr composition.MergeResult) int {
 	if mr.Frontier != nil {
 		names := make([]string, 0)
 		for _, id := range mr.Frontier.VertexIDs() {
@@ -486,27 +446,23 @@ func cmdTrace(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	from, to := args[0], args[1]
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if _, ok := snap.vertexByName(from); !ok {
+	g := state.Graph()
+	if _, ok := vertexNamed(g, from); !ok {
 		fmt.Fprintf(stderr, "trace: unknown vertex %q\n", from)
 		return 1
 	}
-	if _, ok := snap.vertexByName(to); !ok {
+	if _, ok := vertexNamed(g, to); !ok {
 		fmt.Fprintf(stderr, "trace: unknown vertex %q\n", to)
-		return 1
-	}
-	state, err := snap.buildState()
-	if err != nil {
-		fmt.Fprintf(stderr, "trace: %v\n", err)
 		return 1
 	}
 	eng := provenance.NewEngine(ontology.CausalEdges)
 	ctx := context.Background()
-	connected, err := eng.Causes(ctx, state.Graph(), vid(from), vid(to))
+	connected, err := eng.Causes(ctx, g, vid(from), vid(to))
 	if err != nil {
 		fmt.Fprintf(stderr, "trace: %v\n", err)
 		return 1
@@ -515,12 +471,12 @@ func cmdTrace(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s and %s are not causally connected\n", from, to)
 		return 0
 	}
-	traces, err := eng.TraceSet(ctx, state.Graph(), vid(from), vid(to))
+	traces, err := eng.TraceSet(ctx, g, vid(from), vid(to))
 	if err != nil {
 		fmt.Fprintf(stderr, "trace: %v\n", err)
 		return 1
 	}
-	idx := snap.nameIndex()
+	idx := nameIndex(g)
 	fmt.Fprintf(stdout, "%s -> %s: %d path(s)\n", from, to, len(traces))
 	for _, tr := range traces {
 		names := make([]string, 0, len(tr.Vertices))
@@ -538,27 +494,23 @@ func cmdCone(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	name := args[0]
-	snap, err := loadSnapshot()
+	state, err := loadState()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if _, ok := snap.vertexByName(name); !ok {
+	g := state.Graph()
+	if _, ok := vertexNamed(g, name); !ok {
 		fmt.Fprintf(stderr, "cone: unknown vertex %q\n", name)
 		return 1
 	}
-	state, err := snap.buildState()
-	if err != nil {
-		fmt.Fprintf(stderr, "cone: %v\n", err)
-		return 1
-	}
 	eng := provenance.NewEngine(ontology.CausalEdges)
-	cone, err := eng.Cone(context.Background(), state.Graph(), vid(name))
+	cone, err := eng.Cone(context.Background(), g, vid(name))
 	if err != nil {
 		fmt.Fprintf(stderr, "cone: %v\n", err)
 		return 1
 	}
-	idx := snap.nameIndex()
+	idx := nameIndex(g)
 	names := make([]string, 0, len(cone))
 	for _, id := range cone {
 		names = append(names, idx[id])
