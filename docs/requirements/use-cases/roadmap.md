@@ -147,13 +147,14 @@ UC-U04 and UC-U17 stay `Specified` until Phase 4 lands `repo`.
 **All phases complete. Roadmap finished — the original 37 UCs are
 Verified.**
 
-Since the roadmap was finished, six additive capability UCs have landed
-on top of it (tracked in `ledger.md`, which now reads 43/43 Verified):
-UC-U18 (three-way merge), UC-U19 (`cmd/got` CLI), UC-U20 (repository
-persist/reload), UC-S21 (frontier audit / Strict-on-Release), UC-S22
-(durable namespace `FileStore`), UC-S23 (graph snapshot codec). None of
-them add a package to the dependency graph above — they extend existing
-packages (`composition`, `namespace`, `graph`, `repo`) and the new
+Since the roadmap was finished, eight additive capability UCs have
+landed on top of it (tracked in `ledger.md`, which now reads 45/45
+Verified): UC-U18 (three-way merge), UC-U19 (`cmd/got` CLI), UC-U20
+(repository persist/reload), UC-S21 (frontier audit / Strict-on-Release),
+UC-S22 (durable namespace `FileStore`), UC-S23 (graph snapshot codec),
+UC-S24 (graph query language), and UC-S25 (remote namespace over HTTP).
+None of them add a package to the dependency graph above — they extend
+existing packages (`composition`, `namespace`, `graph`, `repo`) and the
 top-level `cmd/got` application — so the phase ordering is unchanged.
 
 Next work is hardening, new UCs, or composability — see the ledger's
