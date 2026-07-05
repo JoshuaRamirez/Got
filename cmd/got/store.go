@@ -1,44 +1,27 @@
 package main
 
 import (
-	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/identity"
-	"github.com/joshuaramirez/got/internal/namespace"
 	"github.com/joshuaramirez/got/internal/ontology"
 	"github.com/joshuaramirez/got/internal/repo"
 )
 
-// snapshot is the on-disk repository state. Vertices and edges reference each
-// other by human-readable name; a vertex's content-addressed VertexID is
-// sha256(name), the same convention the library's tests use. Refs map a
-// branch name to the vertex name it points at.
-type snapshot struct {
-	Vertices []vertexRec       `json:"vertices"`
-	Edges    []edgeRec         `json:"edges"`
-	Refs     map[string]string `json:"refs"`
-}
+// nameAttr is the reserved vertex/edge attribute under which the CLI stores a
+// human-readable name. A content-addressed ID is sha256(name), which is
+// one-way, so the name is carried inside the graph itself (preserved by the
+// UC-S23 snapshot codec) to be recoverable for display after a reload.
+const nameAttr = "got.name"
 
-type vertexRec struct {
-	Name  string            `json:"name"`
-	Type  string            `json:"type"`
-	Attrs map[string]string `json:"attrs,omitempty"`
-}
+func schema() ontology.Schema { return ontology.NewDefaultSchema() }
 
-type edgeRec struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	From string `json:"from"`
-	To   string `json:"to"`
-}
-
-// stateDir returns the repository directory: $GOT_DIR or ".got".
+// stateDir returns the repository directory: $GOT_DIR or ".got". The directory
+// holds graph.json + namespace.json, managed by repo.SaveState / LoadState.
 func stateDir() string {
 	if d := os.Getenv("GOT_DIR"); d != "" {
 		return d
@@ -46,7 +29,14 @@ func stateDir() string {
 	return ".got"
 }
 
-func statePath() string { return filepath.Join(stateDir(), "state.json") }
+// graphFilePath is the file repo.SaveState writes; its presence marks an
+// initialized repository.
+func graphFilePath() string { return filepath.Join(stateDir(), "graph.json") }
+
+func repoInitialized() bool {
+	_, err := os.Stat(graphFilePath())
+	return err == nil
+}
 
 // vid maps a vertex name to its content-addressed VertexID.
 func vid(name string) identity.VertexID {
@@ -58,107 +48,59 @@ func eid(name string) identity.EdgeID {
 	return identity.EdgeID(sha256.Sum256([]byte(name)))
 }
 
-// loadSnapshot reads the state file. It returns a clear error when the
-// repository has not been initialized.
-func loadSnapshot() (*snapshot, error) {
-	b, err := os.ReadFile(statePath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no repository; run 'got init'")
-		}
-		return nil, err
+// loadState loads the repository State (graph.json + a durable namespace
+// FileStore over namespace.json). It errors if the repository is not
+// initialized so callers surface the "run 'got init'" hint.
+func loadState() (repo.State, error) {
+	if !repoInitialized() {
+		return nil, fmt.Errorf("no repository; run 'got init'")
 	}
-	var s snapshot
-	if err := json.Unmarshal(b, &s); err != nil {
-		return nil, fmt.Errorf("corrupt state file: %w", err)
-	}
-	if s.Refs == nil {
-		s.Refs = make(map[string]string)
-	}
-	return &s, nil
+	return repo.LoadState(stateDir(), schema())
 }
 
-// saveSnapshot writes the state file, creating the state directory if needed.
-func saveSnapshot(s *snapshot) error {
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(statePath(), b, 0o644)
+// saveState persists the state's graph value.
+func saveState(state repo.State) error {
+	return repo.SaveState(stateDir(), state)
 }
 
-// repoExists reports whether a state file is already present.
-func repoExists() bool {
-	_, err := os.Stat(statePath())
-	return err == nil
+// withName builds a graph.AttrMap carrying the human name plus any
+// user-supplied attributes.
+func withName(name string, user map[string]string) graph.AttrMap {
+	m := make(graph.AttrMap, len(user)+1)
+	for k, v := range user {
+		m[k] = v
+	}
+	m[nameAttr] = name
+	return m
 }
 
-// nameIndex maps each known VertexID back to its name for display.
-func (s *snapshot) nameIndex() map[identity.VertexID]string {
-	idx := make(map[identity.VertexID]string, len(s.Vertices))
-	for _, v := range s.Vertices {
-		idx[vid(v.Name)] = v.Name
+// nameOf returns the human name stored on a vertex, falling back to a short
+// hex id if none was recorded.
+func nameOf(v graph.Vertex) string {
+	if n, ok := v.Attrs[nameAttr].(string); ok {
+		return n
+	}
+	return shortID(v.ID[:])
+}
+
+// edgeNameOf returns the human name stored on an edge, or a short hex id.
+func edgeNameOf(e graph.Edge) string {
+	if n, ok := e.Attrs[nameAttr].(string); ok {
+		return n
+	}
+	return shortID(e.ID[:])
+}
+
+// nameIndex maps each vertex ID to its human name for display.
+func nameIndex(g graph.Graph) map[identity.VertexID]string {
+	idx := make(map[identity.VertexID]string)
+	for _, v := range g.Vertices() {
+		idx[v.ID] = nameOf(v)
 	}
 	return idx
 }
 
-// vertexByName returns the record for a vertex name, if present.
-func (s *snapshot) vertexByName(name string) (vertexRec, bool) {
-	for _, v := range s.Vertices {
-		if v.Name == name {
-			return v, true
-		}
-	}
-	return vertexRec{}, false
-}
-
-// buildState reconstructs a repo.State (graph + namespace) from the snapshot.
-// The graph is built with the bulk Builder; refs are rebound into a fresh
-// namespace store.
-func (s *snapshot) buildState() (repo.State, error) {
-	schema := ontology.NewDefaultSchema()
-	b := graph.NewBuilder(schema)
-
-	for _, v := range s.Vertices {
-		b.AddVertex(graph.Vertex{
-			ID:    vid(v.Name),
-			Type:  ontology.VertexType(v.Type),
-			Attrs: attrMap(v.Attrs),
-		})
-	}
-	for _, e := range s.Edges {
-		if err := b.AddEdge(graph.Edge{
-			ID:   eid(e.Name),
-			Type: ontology.EdgeType(e.Type),
-			From: vid(e.From),
-			To:   vid(e.To),
-		}); err != nil {
-			return nil, fmt.Errorf("edge %q: %w", e.Name, err)
-		}
-	}
-	g := b.Build()
-
-	ns := namespace.NewStore()
-	for ref, target := range s.Refs {
-		if err := ns.BindRef(context.Background(), namespace.RefName(ref), vid(target)); err != nil {
-			return nil, err
-		}
-	}
-	return repo.NewState(g, ns), nil
-}
-
-// attrMap converts the string-valued snapshot attrs into a graph.AttrMap.
-// Returns nil for an empty map so vertices with no attrs compare cleanly.
-func attrMap(m map[string]string) graph.AttrMap {
-	if len(m) == 0 {
-		return nil
-	}
-	out := make(graph.AttrMap, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
+// vertexNamed returns the vertex with the given human name, if present.
+func vertexNamed(g graph.Graph, name string) (graph.Vertex, bool) {
+	return g.Vertex(vid(name))
 }
