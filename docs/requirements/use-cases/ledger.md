@@ -56,6 +56,8 @@ When a UC is retired:
 | [UC-U18](user/UC-U18-three-way-merge.md) | Three-way merge against a common ancestor | Verified | `internal/composition/threeway.go` (`DefaultEngine.MergeThreeWay`, `ThreeWayMerger`); facade `internal/repo/service.go` (`MergeThreeWay`) | `internal/composition/threeway_test.go`, `internal/repo/repo_test.go` | 2026-06-16 | Additive concrete method (no composition.Engine interface change). Ancestor-relative reconciliation: only-left/only-right/agreed change, add, honored deletion, both-delete success paths; modify/modify, add/add, modify/delete, schema, and Unsat-policy conflict paths; plain-frontier presence-only degradation; ctx cancellation. Content via projection.Edited. Reachable through repo.Service.MergeThreeWay (delegates to ThreeWayMerger; repo.ErrThreeWayUnsupported otherwise); facade one-sided-change and conflict paths covered. Edge-level reconciliation (via EdgeEdits) mirrors the vertex rules — only-left/add/honored-deletion success paths; modify/modify, add/add, modify/delete Structural conflict paths covered. |
 | [UC-U19](user/UC-U19-operate-from-cli.md) | Operate the repository from the command line | Verified | `cmd/got` (`run.go`, `store.go`, `helpers.go`) | `cmd/got/run_test.go` | 2026-06-16 | CLI shell over the library with JSON persistence under $GOT_DIR. init/add-vertex/add-edge/bind/resolve/list/trace/cone/merge/merge3/materialize commands drive repo.Ingest, repo.Branch, repo.Merge, repo.MergeThreeWay, repo.Materialize, namespace.ResolveRef, and provenance.Engine. Tests cover happy paths plus unknown-command, before-init, unknown-type, duplicate, inadmissible-edge (state unchanged), missing-endpoint, bind-unknown, resolve-unbound, unconnected-trace, merge-unknown-vertex, merge3 deletion-honoring, materialize, and cross-invocation persistence. New delivery channel for UC-U01/U03/U04/U06/U09/U10/U11/U18/S08 — no new engine behavior. |
 
+| [UC-U20](user/UC-U20-persist-reload-repository.md) | Persist and reload a repository | Verified | `internal/repo/persist.go` (`SaveState`, `LoadState`) | `internal/repo/repo_test.go` | 2026-06-16 | Directory persistence: graph.json (UC-S23 codec, explicit SaveState, atomic write-then-rename) + namespace.json (UC-S22 FileStore, continuous). End-to-end save→reload round-trip through the facade (graph + edge + ref survive a simulated restart); empty-dir load; repeated-save overwrite; corrupt-graph rejected on load. |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -90,15 +92,15 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 19 | 0 | 19 |
+| User | 0 | 0 | 0 | 20 | 0 | 20 |
 | System | 0 | 0 | 0 | 23 | 0 | 23 |
-| **Total** | **0** | **0** | **0** | **42** | **0** | **42** |
+| **Total** | **0** | **0** | **0** | **43** | **0** | **43** |
 
-**Verified coverage: 42 / 42 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 43 / 43 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
-Strict-on-Release), UC-S22 (durable `FileStore` namespace), and UC-S23
-(graph snapshot codec) added 2026-06-16. All roadmap phases complete
-(see `roadmap.md`). Every public method on every internal `Engine` and
+Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
+(graph snapshot codec), and UC-U20 (repository persist/reload) added
+2026-06-16. All roadmap phases complete (see `roadmap.md`). Every public method on every internal `Engine` and
 `Service` is reachable from at least one user use case and exercised by
 at least one system use case, with behavioral tests covering the main
 success path and at least one failure path per extension group.

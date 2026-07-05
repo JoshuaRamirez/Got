@@ -126,7 +126,11 @@ The dependency graph is a strict DAG.
   the lower layers: Ingest dispatches by `Payload` kind; Revise
   delegates to revision; Branch checks then binds; Merge to
   composition; Evaluate to verification; Materialize chains
-  projection→realization; Release to governance.
+  projection→realization; Release to governance. `repo.SaveState` /
+  `repo.LoadState` (`persist.go`) persist a whole repository to a
+  directory — `graph.json` (the immutable graph, via the UC-S23 codec,
+  written explicitly) plus `namespace.json` (a `FileStore`, continuously
+  durable). UC-U20.
 
 ### Layer 5 — application
 
