@@ -55,6 +55,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-S21](system/UC-S21-audit-frontier-wellformedness.md) | Audit a frontier for structural and temporal well-formedness | `composition.Engine` | `internal/composition` |
 | [UC-S22](system/UC-S22-persist-namespace.md) | Persist namespace bindings to durable storage | `namespace.Store` | `internal/namespace` |
 | [UC-S23](system/UC-S23-serialize-graph.md) | Serialize and deserialize a graph | `graph` codec | `internal/graph` |
+| [UC-S24](system/UC-S24-evaluate-graph-query.md) | Evaluate a graph query | `graph.Graph` | `internal/graph` |
 
 ## Coverage
 
