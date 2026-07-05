@@ -252,7 +252,12 @@ use `namespace.FileStore` (`file.go`), the durable JSON-backed Store
 that guards every method with a mutex and flushes each bind to disk with
 an atomic write-then-rename — safe for concurrent writers and persistent
 across restarts (UC-S22). Only the namespace is persisted; the graph is
-content-addressed and reconstructable.
+content-addressed and reconstructable. `namespace.HTTPStore` +
+`NewHTTPHandler` (`http.go`) run the namespace as a shared network
+service — the client is itself a `Store`, threading the caller's `ctx`
+onto each request (UC-S25); this is the concrete realization of the
+remote backing the `Store` interface's `context.Context` parameter was
+designed for.
 
 ## Where to read next
 
