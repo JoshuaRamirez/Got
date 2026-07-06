@@ -82,6 +82,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdStash(rest, stdout, stderr)
 	case "rebase":
 		return cmdRebase(rest, stdout, stderr)
+	case "reflog":
+		return cmdReflog(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -126,6 +128,7 @@ usage:
   got amend [-m <message>]     (replace the last commit with the working state)
   got stash [push|pop|list]    (save/restore uncommitted working changes)
   got rebase <onto>            (replay the current branch's commits onto another)
+  got reflog [<ref>|--all]     (journal of HEAD/branch tip movements, newest first)
   got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
   got tag <name> [<commit-ish>] | got tags
   got revert <commit-ish>      (new commit undoing the target)
@@ -258,7 +261,9 @@ func cmdCheckout(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		// New branch starts at the current branch's commit; working graph stays.
+		tip := ""
 		if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(cur)); ok {
+			tip = commitHex(commitFromVID(id))
 			if err := state.Namespace().BindRef(ctx, commitRefName(target), id); err != nil {
 				fmt.Fprintf(stderr, "checkout: %v\n", err)
 				return 1
@@ -268,6 +273,7 @@ func cmdCheckout(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "checkout: %v\n", err)
 			return 1
 		}
+		logHEADMove(tip, tip, fmt.Sprintf("moving from %s to %s", cur, target))
 		fmt.Fprintf(stdout, "created and switched to branch %q\n", target)
 		return 0
 	}
@@ -300,10 +306,19 @@ func cmdCheckout(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "checkout: %v\n", err)
 		return 1
 	}
+	oldTip := ""
+	if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(cur)); ok {
+		oldTip = commitHex(commitFromVID(id))
+	}
+	newTip := ""
+	if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(target)); ok {
+		newTip = commitHex(commitFromVID(id))
+	}
 	if err := setHEAD(target); err != nil {
 		fmt.Fprintf(stderr, "checkout: %v\n", err)
 		return 1
 	}
+	logHEADMove(oldTip, newTip, fmt.Sprintf("moving from %s to %s", cur, target))
 	fmt.Fprintf(stdout, "switched to branch %q\n", target)
 	return 0
 }
@@ -779,8 +794,9 @@ func cmdCommit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "commit: %v\n", err)
 		return 1
 	}
-	// Advance the branch's commit pointer (persisted by the FileStore).
-	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(c.ID)); err != nil {
+	// Advance the branch's commit pointer (persisted by the FileStore) and
+	// journal the move to the reflog.
+	if err := setBranchTip(state, branch, c.ID, "commit", message); err != nil {
 		fmt.Fprintf(stderr, "commit: %v\n", err)
 		return 1
 	}
@@ -1189,7 +1205,7 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "merge: %v\n", err)
 			return 1
 		}
-		if err := state.Namespace().BindRef(ctx, commitRefName(cur), otherID); err != nil {
+		if err := setBranchTip(state, cur, otherC, "merge", "fast-forward "+other); err != nil {
 			fmt.Fprintf(stderr, "merge: %v\n", err)
 			return 1
 		}
@@ -1247,7 +1263,7 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "merge: %v\n", err)
 		return 1
 	}
-	if err := state.Namespace().BindRef(ctx, commitRefName(cur), vidFromCommit(c.ID)); err != nil {
+	if err := setBranchTip(state, cur, c.ID, "merge", "merge "+other+" into "+cur); err != nil {
 		fmt.Fprintf(stderr, "merge: %v\n", err)
 		return 1
 	}
@@ -1418,7 +1434,7 @@ func cmdRevert(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "revert: %v\n", err)
 		return 1
 	}
-	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(newC.ID)); err != nil {
+	if err := setBranchTip(state, branch, newC.ID, "revert", "Revert: "+c.Message); err != nil {
 		fmt.Fprintf(stderr, "revert: %v\n", err)
 		return 1
 	}
@@ -1452,14 +1468,13 @@ func cmdReset(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "reset: %v\n", err)
 		return 1
 	}
-	ctx := context.Background()
 	cid, ok := resolveCommit(state, log, fs.Arg(0))
 	if !ok {
 		fmt.Fprintf(stderr, "reset: unknown commit-ish %q\n", fs.Arg(0))
 		return 1
 	}
 	branch := currentBranch()
-	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(cid)); err != nil {
+	if err := setBranchTip(state, branch, cid, "reset", "moving to "+shortID(cid[:])); err != nil {
 		fmt.Fprintf(stderr, "reset: %v\n", err)
 		return 1
 	}
@@ -1675,7 +1690,7 @@ func cmdRebase(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "rebase: %v\n", err)
 			return 1
 		}
-		if err := state.Namespace().BindRef(ctx, commitRefName(cur), ontoTipID); err != nil {
+		if err := setBranchTip(state, cur, ontoTip, "rebase", "fast-forward onto "+onto); err != nil {
 			fmt.Fprintf(stderr, "rebase: %v\n", err)
 			return 1
 		}
@@ -1736,7 +1751,7 @@ func cmdRebase(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "rebase: %v\n", err)
 		return 1
 	}
-	if err := state.Namespace().BindRef(ctx, commitRefName(cur), vidFromCommit(running)); err != nil {
+	if err := setBranchTip(state, cur, running, "rebase", "onto "+onto); err != nil {
 		fmt.Fprintf(stderr, "rebase: %v\n", err)
 		return 1
 	}
@@ -1745,6 +1760,56 @@ func cmdRebase(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "rebased %d commit(s) of %s onto %s\n", len(replay), cur, onto)
+	return 0
+}
+
+// cmdReflog prints the ref-movement journal, newest first. With no argument it
+// shows HEAD (like git); with a branch name it shows that ref; with --all it
+// shows every ref interleaved. Each line is: <short-new> <ref>@{i}: <action>: <message>.
+func cmdReflog(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reflog", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var all bool
+	fs.BoolVar(&all, "all", false, "show movements of every ref, not just HEAD")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if !repoInitialized() {
+		fmt.Fprintln(stderr, "no repository; run 'got init'")
+		return 1
+	}
+	entries, err := loadReflog()
+	if err != nil {
+		fmt.Fprintf(stderr, "reflog: %v\n", err)
+		return 1
+	}
+
+	ref := "HEAD"
+	if fs.NArg() == 1 {
+		ref = fs.Arg(0)
+	}
+
+	// Filter to the selected ref (unless --all), preserving order, then number
+	// per-ref from newest (@{0}) and print newest-first.
+	var selected []reflogEntry
+	for _, e := range entries {
+		if all || e.Ref == ref {
+			selected = append(selected, e)
+		}
+	}
+	if len(selected) == 0 {
+		fmt.Fprintln(stdout, "(no reflog entries)")
+		return 0
+	}
+	for i := len(selected) - 1; i >= 0; i-- {
+		e := selected[i]
+		idx := len(selected) - 1 - i
+		short := e.New
+		if len(short) >= 8 {
+			short = short[:8]
+		}
+		fmt.Fprintf(stdout, "%s %s@{%d}: %s: %s\n", short, e.Ref, idx, e.Action, e.Message)
+	}
 	return 0
 }
 
@@ -1811,7 +1876,7 @@ func cmdCherryPick(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
 		return 1
 	}
-	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(newC.ID)); err != nil {
+	if err := setBranchTip(state, branch, newC.ID, "cherry-pick", "cherry-pick "+shortID(cid[:])); err != nil {
 		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
 		return 1
 	}
@@ -1864,7 +1929,7 @@ func cmdAmend(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "amend: %v\n", err)
 		return 1
 	}
-	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(newC.ID)); err != nil {
+	if err := setBranchTip(state, branch, newC.ID, "amend", msg); err != nil {
 		fmt.Fprintf(stderr, "amend: %v\n", err)
 		return 1
 	}
