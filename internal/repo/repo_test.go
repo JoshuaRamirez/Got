@@ -863,3 +863,39 @@ func TestMergeStatesConflict(t *testing.T) {
 		t.Fatal("expected a conflict for divergent edits to the same vertex")
 	}
 }
+
+// --- UC-U32: merge strategy resolution ---
+
+func TestMergeStatesStrategy(t *testing.T) {
+	svc := newService(t)
+	schema := ontology.NewDefaultSchema()
+
+	base := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("base"), Type: ontology.Artifact})
+	})
+	left := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("base"), Type: ontology.Artifact})
+		b.AddVertex(graph.Vertex{ID: vid("X"), Type: ontology.Artifact, Attrs: graph.AttrMap{"s": "left"}})
+	})
+	right := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("base"), Type: ontology.Artifact})
+		b.AddVertex(graph.Vertex{ID: vid("X"), Type: ontology.Artifact, Attrs: graph.AttrMap{"s": "right"}})
+	})
+
+	// ours = prefer left.
+	g, err := svc.MergeStatesStrategy(schema, base, left, right, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := g.Vertex(vid("X")); !ok || v.Attrs["s"] != "left" {
+		t.Fatalf("--ours should keep left's X: %+v", v)
+	}
+	// theirs = prefer right.
+	g2, err := svc.MergeStatesStrategy(schema, base, left, right, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := g2.Vertex(vid("X")); !ok || v.Attrs["s"] != "right" {
+		t.Fatalf("--theirs should take right's X: %+v", v)
+	}
+}

@@ -79,6 +79,7 @@ When a UC is retired:
 | [UC-U30](user/UC-U30-stash.md) | Stash uncommitted working changes | Verified | `cmd/got` (`stash push`/`pop`/`list`) | `cmd/got/run_test.go` | 2026-06-16 | stash push saves the working snapshot onto a LIFO stack (stash.json) and resets the working graph to HEAD; pop restores the top; list shows the stack. Tests: stash+clean+list+pop restores; nothing-to-stash; pop-empty. |
 
 | [UC-U31](user/UC-U31-rebase.md) | Rebase a branch onto another | Verified | `cmd/got` (`rebase`) | `cmd/got/run_test.go` | 2026-06-16 | rebase <onto>: replay the current branch's commits above the merge base onto <onto>'s tip as new commits (linear history rewrite); fast-forward when current is an ancestor, up-to-date when onto is; refuse unrelated histories / self. Tests: rebase (linear m1<-f1 + working tree), fast-forward, up-to-date. |
+| [UC-U32](user/UC-U32-merge-strategy.md) | Resolve a merge with a strategy | Verified | `internal/repo/merge.go` (`MergeStatesStrategy`), `cmd/got` (`merge --ours`/`--theirs`) | `internal/repo/repo_test.go`, `cmd/got/run_test.go` | 2026-06-16 | Plain `merge` aborts on typed conflicts with a hint; `merge <branch> --ours`/`--theirs` runs a per-vertex/per-edge three-way merge with a tiebreaker (agreed and one-sided changes taken; genuine same-target conflict picks our/their side; modify/delete honors the chosen action). Both flags together rejected. Tests: MergeStatesStrategy (add/add conflict → ours=left, theirs=right), CLI abort, ours/theirs outcome, mutual exclusion. |
 
 ## System use cases
 
@@ -118,11 +119,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 31 | 0 | 31 |
+| User | 0 | 0 | 0 | 32 | 0 | 32 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **58** | **0** | **58** |
+| **Total** | **0** | **0** | **0** | **59** | **0** | **59** |
 
-**Verified coverage: 58 / 58 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 59 / 59 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added
