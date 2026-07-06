@@ -75,9 +75,13 @@ func withName(name string, user map[string]string) graph.AttrMap {
 }
 
 // nameOf returns the human name stored on a vertex, falling back to a short
-// hex id if none was recorded.
+// hex id if none was recorded. Branch vertices carry their name under
+// repo's "branch.name" attribute instead of got.name, so it is checked too.
 func nameOf(v graph.Vertex) string {
 	if n, ok := v.Attrs[nameAttr].(string); ok {
+		return n
+	}
+	if n, ok := v.Attrs["branch.name"].(string); ok {
 		return n
 	}
 	return shortID(v.ID[:])

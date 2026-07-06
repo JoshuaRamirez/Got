@@ -40,6 +40,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdBind(rest, stdout, stderr)
 	case "resolve":
 		return cmdResolve(rest, stdout, stderr)
+	case "branch":
+		return cmdBranch(rest, stdout, stderr)
+	case "branches":
+		return cmdBranches(rest, stdout, stderr)
+	case "branch-log":
+		return cmdBranchLog(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -71,6 +77,9 @@ usage:
   got add-edge <name> --type <EdgeType> --from <v> --to <v>
   got bind <ref> <vertex>
   got resolve <ref>
+  got branch <name> [--from <parent>] [--tip <vertex>] [--desc <text>]
+  got branches
+  got branch-log <name>
   got list vertices|edges
   got merge <listA> <listB>              (comma-separated vertex names)
   got merge3 <ancestor> <left> <right>   (three-way, comma-separated lists)
@@ -276,6 +285,114 @@ func cmdResolve(args []string, stdout, stderr io.Writer) int {
 	}
 	name := nameIndex(state.Graph())[id]
 	fmt.Fprintf(stdout, "%s -> %s (%s)\n", ref, name, shortID(id[:]))
+	return 0
+}
+
+func cmdBranch(args []string, stdout, stderr io.Writer) int {
+	name, rest, ok := splitName(args)
+	if !ok {
+		fmt.Fprintln(stderr, "branch: expected '<name> [--from <parent>] [--tip <vertex>] [--desc <text>]'")
+		return 2
+	}
+	fs := flag.NewFlagSet("branch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var from, tip, desc string
+	fs.StringVar(&from, "from", "", "parent branch name")
+	fs.StringVar(&tip, "tip", "", "vertex the branch initially points at")
+	fs.StringVar(&desc, "desc", "", "branch description")
+	if err := fs.Parse(rest); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "branch: unexpected extra arguments")
+		return 2
+	}
+
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	var tipID identity.VertexID
+	if tip != "" {
+		if _, ok := vertexNamed(state.Graph(), tip); !ok {
+			fmt.Fprintf(stderr, "branch: unknown --tip vertex %q\n", tip)
+			return 1
+		}
+		tipID = vid(tip)
+	}
+	meta := map[string]string{}
+	if desc != "" {
+		meta["desc"] = desc
+	}
+
+	newState, b, err := newService().CreateBranch(context.Background(), state, name, from, tipID, meta)
+	if err != nil {
+		fmt.Fprintf(stderr, "branch: %v\n", err)
+		return 1
+	}
+	if err := saveState(newState); err != nil {
+		fmt.Fprintf(stderr, "branch: %v\n", err)
+		return 1
+	}
+	if b.Parent != "" {
+		fmt.Fprintf(stdout, "created branch %q (forked from %q)\n", b.Name, b.Parent)
+	} else {
+		fmt.Fprintf(stdout, "created branch %q\n", b.Name)
+	}
+	return 0
+}
+
+func cmdBranches(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "branches: takes no arguments")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	branches, err := newService().Branches(context.Background(), state)
+	if err != nil {
+		fmt.Fprintf(stderr, "branches: %v\n", err)
+		return 1
+	}
+	sort.Slice(branches, func(i, j int) bool { return branches[i].Name < branches[j].Name })
+	for _, b := range branches {
+		line := b.Name
+		if b.Parent != "" {
+			line += "\t(from " + b.Parent + ")"
+		}
+		if d := b.Attrs["desc"]; d != "" {
+			line += "\t" + d
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	return 0
+}
+
+func cmdBranchLog(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "branch-log: expected <name>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	lineage, err := newService().BranchLineage(context.Background(), state, args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "branch-log: %v\n", err)
+		return 1
+	}
+	names := make([]string, len(lineage))
+	for i, b := range lineage {
+		names[i] = b.Name
+	}
+	// child ← parent ← … ← root
+	fmt.Fprintln(stdout, strings.Join(names, " <- "))
 	return 0
 }
 

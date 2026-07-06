@@ -58,6 +58,8 @@ When a UC is retired:
 
 | [UC-U20](user/UC-U20-persist-reload-repository.md) | Persist and reload a repository | Verified | `internal/repo/persist.go` (`SaveState`, `LoadState`) | `internal/repo/repo_test.go` | 2026-06-16 | Directory persistence: graph.json (UC-S23 codec, explicit SaveState, atomic write-then-rename) + namespace.json (UC-S22 FileStore, continuous). End-to-end save→reload round-trip through the facade (graph + edge + ref survive a simulated restart); empty-dir load; repeated-save overwrite; corrupt-graph rejected on load. |
 
+| [UC-U21](user/UC-U21-first-class-branches.md) | Manage first-class branches | Verified | `internal/repo/branch.go` (`CreateBranch`, `Branches`, `BranchLineage`, `Branch`), `internal/ontology/schema.go` (`{BranchSelector,ForksFrom,BranchSelector}`) | `internal/repo/repo_test.go`, `cmd/got/run_test.go` | 2026-06-16 | A branch is a first-class BranchSelector vertex (identity + metadata + forks_from lineage), not a bare pointer; the mutable tip is a namespace binding. Create (with parent + tip + metadata), list, and fork-lineage traversal; ErrBranchExists, ErrUnknownBranch, unknown-tip failure paths. CLI: branch/branches/branch-log. Fork ancestry (branch-log) is a capability git structurally lacks. |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -94,11 +96,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 20 | 0 | 20 |
+| User | 0 | 0 | 0 | 21 | 0 | 21 |
 | System | 0 | 0 | 0 | 25 | 0 | 25 |
-| **Total** | **0** | **0** | **0** | **45** | **0** | **45** |
+| **Total** | **0** | **0** | **0** | **46** | **0** | **46** |
 
-**Verified coverage: 45 / 45 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 46 / 46 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added

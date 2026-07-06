@@ -43,9 +43,17 @@ go build -o got ./cmd/got
 ./got list vertices
 ./got bind main art
 ./got resolve main
+./got branch release-2 --from main --desc "the 2.x line"
+./got branch hotfix    --from release-2
+./got branches            # each branch is a real object with metadata + parent
+./got branch-log hotfix   # fork ancestry: hotfix <- release-2 <- main
 ./got trace exec art      # causal paths via the provenance engine
 ./got cone exec           # provenance cone
 ```
+
+Unlike a git branch — a bare mutable pointer with no identity or history — a
+branch here is a first-class `BranchSelector` vertex: it carries metadata, records
+its fork parent, persists in the graph, and has traceable ancestry (`branch-log`).
 
 Inadmissible edges are rejected by the graph's well-formedness check, so the
 CLI surfaces the same ontology guarantees the library enforces.

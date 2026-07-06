@@ -610,3 +610,107 @@ func TestLoadStateCorruptGraph(t *testing.T) {
 		t.Fatal("expected error loading corrupt graph file")
 	}
 }
+
+// --- UC-U21: first-class branches ---
+
+func TestCreateBranchAndList(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	state, main, err := svc.CreateBranch(ctx, state, "main", "", identity.VertexID{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main.Name != "main" || main.Parent != "" {
+		t.Fatalf("unexpected main branch: %+v", main)
+	}
+	state, feat, err := svc.CreateBranch(ctx, state, "feature", "main", identity.VertexID{}, map[string]string{"desc": "new work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if feat.Parent != "main" || feat.Attrs["desc"] != "new work" {
+		t.Fatalf("unexpected feature branch: %+v", feat)
+	}
+
+	branches, err := svc.Branches(ctx, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got %d", len(branches))
+	}
+}
+
+func TestBranchLineage(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	state, _, _ = svc.CreateBranch(ctx, state, "main", "", identity.VertexID{}, nil)
+	state, _, _ = svc.CreateBranch(ctx, state, "release", "main", identity.VertexID{}, nil)
+	state, _, err := svc.CreateBranch(ctx, state, "feature", "release", identity.VertexID{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lineage, err := svc.BranchLineage(ctx, state, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, len(lineage))
+	for i, b := range lineage {
+		got[i] = b.Name
+	}
+	want := []string{"feature", "release", "main"}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("lineage = %v, want %v", got, want)
+	}
+}
+
+func TestCreateBranchDuplicate(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+	state, _, _ = svc.CreateBranch(ctx, state, "main", "", identity.VertexID{}, nil)
+	if _, _, err := svc.CreateBranch(ctx, state, "main", "", identity.VertexID{}, nil); !errors.Is(err, repo.ErrBranchExists) {
+		t.Fatalf("expected ErrBranchExists, got %v", err)
+	}
+}
+
+func TestCreateBranchUnknownParent(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+	if _, _, err := svc.CreateBranch(ctx, state, "x", "ghost", identity.VertexID{}, nil); !errors.Is(err, repo.ErrUnknownBranch) {
+		t.Fatalf("expected ErrUnknownBranch, got %v", err)
+	}
+}
+
+func TestCreateBranchBindsTip(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+
+	// A vertex to point the tip at.
+	tip := graph.Vertex{ID: vid("tip-art"), Type: ontology.Artifact}
+	state, err := svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{tip}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, _, err = svc.CreateBranch(ctx, state, "main", "", tip.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := state.Namespace().ResolveRef(ctx, "main"); !ok || got != tip.ID {
+		t.Fatalf("branch tip not bound: got %v ok=%v", got, ok)
+	}
+}
+
+func TestBranchSentinels(t *testing.T) {
+	for _, e := range []error{repo.ErrBranchExists, repo.ErrUnknownBranch} {
+		if !errors.Is(e, e) {
+			t.Fatal("sentinel must match itself")
+		}
+	}
+}
