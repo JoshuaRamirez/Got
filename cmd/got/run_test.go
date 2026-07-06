@@ -715,3 +715,49 @@ func TestRestore(t *testing.T) {
 		t.Fatalf("restore should drop junk: %q", out)
 	}
 }
+
+// --- branch delete / rename (UC-U27) ---
+
+func TestBranchDelete(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	runCLI(t, "checkout", "-b", "feature")
+	runCLI(t, "checkout", "main")
+	if code, out, errs := runCLI(t, "branch", "-d", "feature"); code != 0 || !strings.Contains(out, "deleted") {
+		t.Fatalf("branch -d: %s %s", errs, out)
+	}
+	code, _, errs := runCLI(t, "checkout", "feature")
+	if code != 1 || !strings.Contains(errs, "no such branch") {
+		t.Fatalf("deleted branch should be gone: code=%d err=%q", code, errs)
+	}
+}
+
+func TestBranchDeleteCurrentRefused(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	code, _, errs := runCLI(t, "branch", "-d", "main")
+	if code != 1 || !strings.Contains(errs, "current branch") {
+		t.Fatalf("expected current-branch refusal, code=%d err=%q", code, errs)
+	}
+}
+
+func TestBranchRename(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	runCLI(t, "checkout", "-b", "dev")
+	runCLI(t, "checkout", "main")
+	if code, out, errs := runCLI(t, "branch", "-m", "dev", "devel"); code != 0 || !strings.Contains(out, "renamed") {
+		t.Fatalf("branch -m: %s %s", errs, out)
+	}
+	// new name works, old gone.
+	if code, _, _ := runCLI(t, "checkout", "devel"); code != 0 {
+		t.Fatal("renamed branch should be checkoutable")
+	}
+	runCLI(t, "checkout", "main")
+	if code, _, _ := runCLI(t, "checkout", "dev"); code == 0 {
+		t.Fatal("old branch name should be gone")
+	}
+}

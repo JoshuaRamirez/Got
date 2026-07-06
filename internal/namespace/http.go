@@ -75,6 +75,27 @@ func NewHTTPHandler(store Store) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	mux.HandleFunc("/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req bindReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request body", http.StatusBadRequest)
+			return
+		}
+		if req.Kind != "ref" {
+			http.Error(w, "only ref deletion is supported", http.StatusBadRequest)
+			return
+		}
+		if err := store.DeleteRef(r.Context(), RefName(req.Name)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	mux.HandleFunc("/resolve", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -184,6 +205,28 @@ func (s *HTTPStore) BindRef(ctx context.Context, name RefName, id identity.Verte
 // ResolveRef satisfies Store.
 func (s *HTTPStore) ResolveRef(ctx context.Context, name RefName) (identity.VertexID, bool) {
 	return s.resolve(ctx, "ref", string(name))
+}
+
+// DeleteRef satisfies Store.
+func (s *HTTPStore) DeleteRef(ctx context.Context, name RefName) error {
+	body, err := json.Marshal(bindReq{Kind: "ref", Name: string(name)})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base+"/delete", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("namespace: remote delete ref %q failed: %s", name, resp.Status)
+	}
+	return nil
 }
 
 // BindAlias satisfies Store.

@@ -90,3 +90,20 @@ func TestHTTPStoreContextCancelled(t *testing.T) {
 		t.Fatal("cancelled resolve should surface as not-found")
 	}
 }
+
+func TestHTTPStoreDelete(t *testing.T) {
+	ctx := context.Background()
+	client, backing := newRemote(t)
+	if err := client.BindRef(ctx, "main", fvid("t")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteRef(ctx, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := client.ResolveRef(ctx, "main"); ok {
+		t.Fatal("deleted ref should not resolve over HTTP")
+	}
+	if _, ok := backing.ResolveRef(ctx, "main"); ok {
+		t.Fatal("delete should reach the backing store")
+	}
+}

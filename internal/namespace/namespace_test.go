@@ -97,3 +97,22 @@ func TestBindResolveProjection(t *testing.T) {
 		t.Fatalf("ResolveProjection = %v, want %v", got, v)
 	}
 }
+
+func TestDeleteRefMem(t *testing.T) {
+	ctx := context.Background()
+	s := namespace.NewStore()
+	id := identity.VertexID(sha256.Sum256([]byte("x")))
+	if err := s.BindRef(ctx, "main", id); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteRef(ctx, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.ResolveRef(ctx, "main"); ok {
+		t.Fatal("deleted ref should not resolve")
+	}
+	// Deleting an absent ref is a no-op.
+	if err := s.DeleteRef(ctx, "ghost"); err != nil {
+		t.Fatalf("delete of absent ref should be a no-op: %v", err)
+	}
+}

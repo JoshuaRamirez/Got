@@ -33,6 +33,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U24](user/UC-U24-merge-branches.md) | Merge a branch semantically | Developer / Integrator | `repo`, `history`, `cmd/got` |
 | [UC-U25](user/UC-U25-show-tag-revert.md) | Inspect, tag, and revert commits | Developer | `cmd/got` |
 | [UC-U26](user/UC-U26-reset-restore.md) | Reset a branch and restore the working graph | Developer | `cmd/got` |
+| [UC-U27](user/UC-U27-branch-delete-rename.md) | Delete and rename branches | Developer | `cmd/got`, `namespace` |
 
 ## System use cases (sub-function level)
 

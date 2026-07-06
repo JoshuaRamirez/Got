@@ -33,6 +33,11 @@ func (s *memStore) ResolveRef(_ context.Context, name RefName) (identity.VertexI
 	return id, ok
 }
 
+func (s *memStore) DeleteRef(_ context.Context, name RefName) error {
+	delete(s.refs, name)
+	return nil
+}
+
 func (s *memStore) BindAlias(_ context.Context, name Alias, id identity.VertexID) error {
 	s.aliases[name] = id
 	return nil
