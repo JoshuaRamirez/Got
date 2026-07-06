@@ -47,6 +47,8 @@ go build -o got ./cmd/got
 ./got branch hotfix    --from release-2
 ./got branches            # each branch is a real object with metadata + parent
 ./got branch-log hotfix   # fork ancestry: hotfix <- release-2 <- main
+./got commit -m "add art" --actor you   # record current state as a commit
+./got log                 # branch history, newest first (non-lossy)
 ./got trace exec art      # causal paths via the provenance engine
 ./got cone exec           # provenance cone
 ```

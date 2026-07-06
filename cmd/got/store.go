@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 
 	"github.com/joshuaramirez/got/internal/graph"
+	"github.com/joshuaramirez/got/internal/history"
 	"github.com/joshuaramirez/got/internal/identity"
+	"github.com/joshuaramirez/got/internal/namespace"
 	"github.com/joshuaramirez/got/internal/ontology"
 	"github.com/joshuaramirez/got/internal/repo"
 )
@@ -108,3 +110,18 @@ func nameIndex(g graph.Graph) map[identity.VertexID]string {
 func vertexNamed(g graph.Graph, name string) (graph.Vertex, bool) {
 	return g.Vertex(vid(name))
 }
+
+// --- commit history ---
+
+func loadHistory() (*history.Log, error) { return repo.LoadHistory(stateDir()) }
+
+func saveHistory(log *history.Log) error { return repo.SaveHistory(stateDir(), log) }
+
+// commitRefName is the namespace ref that tracks a branch's current commit,
+// kept separate from the branch's vertex tip.
+func commitRefName(branch string) namespace.RefName { return namespace.RefName("commit:" + branch) }
+
+// A CommitID and a VertexID are both 32-byte content hashes; the namespace
+// stores VertexIDs, so branch commit pointers are round-tripped through these.
+func vidFromCommit(c history.CommitID) identity.VertexID { return identity.VertexID(c) }
+func commitFromVID(v identity.VertexID) history.CommitID { return history.CommitID(v) }

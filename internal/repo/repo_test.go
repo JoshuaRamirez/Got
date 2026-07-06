@@ -11,6 +11,7 @@ import (
 	"github.com/joshuaramirez/got/internal/composition"
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
+	"github.com/joshuaramirez/got/internal/history"
 	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/namespace"
 	"github.com/joshuaramirez/got/internal/ontology"
@@ -712,5 +713,86 @@ func TestBranchSentinels(t *testing.T) {
 		if !errors.Is(e, e) {
 			t.Fatal("sentinel must match itself")
 		}
+	}
+}
+
+// --- UC-U22: commit history ---
+
+func TestCommitAndAncestry(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	state := newState()
+	log := history.NewLog()
+
+	// First commit: state has vertex a.
+	state, err := svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{{ID: vid("a"), Type: ontology.Artifact}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1, err := svc.Commit(ctx, state, log, "add a", "alice", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c1.Produced) != 1 {
+		t.Fatalf("first commit should record 1 produced vertex, got %d", len(c1.Produced))
+	}
+
+	// Second commit: add b; parent is c1.
+	state, err = svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{{ID: vid("b"), Type: ontology.Artifact}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := svc.Commit(ctx, state, log, "add b", "bob", []history.CommitID{c1.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c2.Produced) != 1 || c2.Produced[0] != vid("b") {
+		t.Fatalf("second commit should record b as produced, got %+v", c2.Produced)
+	}
+
+	anc, err := log.Ancestors(c2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anc) != 2 || anc[0].ID != c2.ID || anc[1].ID != c1.ID {
+		t.Fatalf("ancestry = %d commits, want [c2, c1]", len(anc))
+	}
+}
+
+func TestSaveLoadHistory(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	svc := newService(t)
+	state := newState()
+	log := history.NewLog()
+
+	state, err := svc.Ingest(ctx, state, repo.VertexPayload{Vertices: []graph.Vertex{{ID: vid("a"), Type: ontology.Artifact}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := svc.Commit(ctx, state, log, "only", "alice", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveHistory(dir, log); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := repo.LoadHistory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := reloaded.Get(c.ID)
+	if !ok || got.Message != "only" {
+		t.Fatalf("commit did not survive save/load: %+v ok=%v", got, ok)
+	}
+}
+
+func TestLoadHistoryEmptyDir(t *testing.T) {
+	log, err := repo.LoadHistory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log.Commits()) != 0 {
+		t.Fatal("empty dir should load an empty history")
 	}
 }

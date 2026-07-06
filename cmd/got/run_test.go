@@ -355,3 +355,60 @@ func TestBranchWithTip(t *testing.T) {
 		t.Fatalf("branch should persist, got %q", out)
 	}
 }
+
+// --- commit / log (UC-U22) ---
+
+func TestCommitAndLog(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	if code, out, errs := runCLI(t, "commit", "-m", "add a", "--actor", "alice"); code != 0 {
+		t.Fatalf("commit: %s %s", errs, out)
+	}
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	if code, _, errs := runCLI(t, "commit", "-m", "add b", "--actor", "bob"); code != 0 {
+		t.Fatalf("commit 2: %s", errs)
+	}
+	code, out, _ := runCLI(t, "log")
+	if code != 0 {
+		t.Fatal("log failed")
+	}
+	// Newest first, with messages and authors.
+	if !strings.Contains(out, "add b") || !strings.Contains(out, "add a") {
+		t.Fatalf("expected both commits in log, got %q", out)
+	}
+	if !strings.Contains(out, "bob") || !strings.Contains(out, "alice") {
+		t.Fatalf("expected authors in log, got %q", out)
+	}
+	if strings.Index(out, "add b") > strings.Index(out, "add a") {
+		t.Fatalf("expected newest-first order, got %q", out)
+	}
+}
+
+func TestLogNoCommits(t *testing.T) {
+	initRepo(t)
+	code, out, _ := runCLI(t, "log")
+	if code != 0 || !strings.Contains(out, "no commits") {
+		t.Fatalf("expected 'no commits', code=%d out=%q", code, out)
+	}
+}
+
+func TestCommitRequiresMessage(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	code, _, errs := runCLI(t, "commit", "--actor", "x")
+	if code != 2 || !strings.Contains(errs, "required") {
+		t.Fatalf("expected message-required error, code=%d err=%q", code, errs)
+	}
+}
+
+// Commits persist across invocations (separate process-equivalent calls).
+func TestCommitPersistence(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "first")
+	// Fresh run call must see the commit.
+	_, out, _ := runCLI(t, "log")
+	if !strings.Contains(out, "first") {
+		t.Fatalf("commit should persist across invocations, got %q", out)
+	}
+}

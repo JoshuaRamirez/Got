@@ -11,6 +11,7 @@ import (
 	"github.com/joshuaramirez/got/internal/composition"
 	"github.com/joshuaramirez/got/internal/governance"
 	"github.com/joshuaramirez/got/internal/graph"
+	"github.com/joshuaramirez/got/internal/history"
 	"github.com/joshuaramirez/got/internal/identity"
 	"github.com/joshuaramirez/got/internal/ontology"
 	"github.com/joshuaramirez/got/internal/projection"
@@ -46,6 +47,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdBranches(rest, stdout, stderr)
 	case "branch-log":
 		return cmdBranchLog(rest, stdout, stderr)
+	case "commit":
+		return cmdCommit(rest, stdout, stderr)
+	case "log":
+		return cmdLog(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -80,6 +85,8 @@ usage:
   got branch <name> [--from <parent>] [--tip <vertex>] [--desc <text>]
   got branches
   got branch-log <name>
+  got commit -m <message> [--branch <name>] [--actor <name>]
+  got log [<branch>]
   got list vertices|edges
   got merge <listA> <listB>              (comma-separated vertex names)
   got merge3 <ancestor> <left> <right>   (three-way, comma-separated lists)
@@ -393,6 +400,101 @@ func cmdBranchLog(args []string, stdout, stderr io.Writer) int {
 	}
 	// child ← parent ← … ← root
 	fmt.Fprintln(stdout, strings.Join(names, " <- "))
+	return 0
+}
+
+func cmdCommit(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("commit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var message, branch, actor string
+	fs.StringVar(&message, "m", "", "commit message (required)")
+	fs.StringVar(&branch, "branch", "main", "branch to commit on")
+	fs.StringVar(&actor, "actor", "", "commit author")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if message == "" {
+		fmt.Fprintln(stderr, "commit: -m <message> is required")
+		return 2
+	}
+
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "commit: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+
+	var parents []history.CommitID
+	if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(branch)); ok {
+		parents = []history.CommitID{commitFromVID(id)}
+	}
+
+	c, err := newService().Commit(ctx, state, log, message, actor, parents)
+	if err != nil {
+		fmt.Fprintf(stderr, "commit: %v\n", err)
+		return 1
+	}
+	if err := saveHistory(log); err != nil {
+		fmt.Fprintf(stderr, "commit: %v\n", err)
+		return 1
+	}
+	// Advance the branch's commit pointer (persisted by the FileStore).
+	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(c.ID)); err != nil {
+		fmt.Fprintf(stderr, "commit: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "committed %s to %s: %s\n", shortID(c.ID[:]), branch, message)
+	if n := len(c.Produced); n > 0 {
+		fmt.Fprintf(stdout, "  +%d vertex(es)", n)
+		if m := len(c.Consumed); m > 0 {
+			fmt.Fprintf(stdout, " -%d", m)
+		}
+		fmt.Fprintln(stdout)
+	}
+	return 0
+}
+
+func cmdLog(args []string, stdout, stderr io.Writer) int {
+	branch := "main"
+	if len(args) == 1 {
+		branch = args[0]
+	} else if len(args) > 1 {
+		fmt.Fprintln(stderr, "log: expected an optional <branch>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "log: %v\n", err)
+		return 1
+	}
+	head, ok := state.Namespace().ResolveRef(context.Background(), commitRefName(branch))
+	if !ok {
+		fmt.Fprintf(stdout, "no commits on branch %q\n", branch)
+		return 0
+	}
+	commits, err := log.Ancestors(commitFromVID(head))
+	if err != nil {
+		fmt.Fprintf(stderr, "log: %v\n", err)
+		return 1
+	}
+	for _, c := range commits {
+		author := c.Actor
+		if author == "" {
+			author = "-"
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", shortID(c.ID[:]), author, c.Message)
+	}
 	return 0
 }
 
