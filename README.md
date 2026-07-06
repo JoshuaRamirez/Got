@@ -51,6 +51,7 @@ go build -o got ./cmd/got
 ./got status              # current branch + uncommitted changes
 ./got checkout -b feature # create + switch branch (working tree follows HEAD)
 ./got merge feature       # semantic three-way merge into current branch
+./got tag v1 ; ./got show v1 ; ./got revert v1   # name / inspect / undo a commit
 ./got log                 # branch history, newest first (non-lossy)
 ./got diff                # structural diff of HEAD's last commit vs its parent
 ./got trace exec art      # causal paths via the provenance engine

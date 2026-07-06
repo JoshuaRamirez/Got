@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -59,6 +60,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(rest, stdout, stderr)
 	case "merge-base":
 		return cmdMergeBase(rest, stdout, stderr)
+	case "show":
+		return cmdShow(rest, stdout, stderr)
+	case "tag":
+		return cmdTag(rest, stdout, stderr)
+	case "tags":
+		return cmdTag(nil, stdout, stderr)
+	case "revert":
+		return cmdRevert(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -97,6 +106,9 @@ usage:
   got checkout <branch>   (alias: switch; --force to discard uncommitted changes)
   got commit -m <message> [--branch <name>] [--actor <name>]
   got log [<branch>]
+  got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
+  got tag <name> [<commit-ish>] | got tags
+  got revert <commit-ish>      (new commit undoing the target)
   got diff [<branch>]          (last commit vs its parent; default HEAD)
   got diff <branchA> <branchB> (two branch heads)
   got list vertices|edges
@@ -939,6 +951,177 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "merged %q into %q: %s\n", other, cur, shortID(c.ID[:]))
+	return 0
+}
+
+func cmdShow(args []string, stdout, stderr io.Writer) int {
+	ref := currentBranch()
+	if len(args) == 1 {
+		ref = args[0]
+	} else if len(args) > 1 {
+		fmt.Fprintln(stderr, "show: expected an optional <commit-ish>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "show: %v\n", err)
+		return 1
+	}
+	cid, ok := resolveCommit(state, log, ref)
+	if !ok {
+		fmt.Fprintf(stderr, "show: unknown commit-ish %q\n", ref)
+		return 1
+	}
+	c, _ := log.Get(cid)
+	fmt.Fprintf(stdout, "commit %s\n", shortID(c.ID[:]))
+	if len(c.Parents) > 1 {
+		ps := make([]string, len(c.Parents))
+		for i, p := range c.Parents {
+			ps[i] = shortID(p[:])
+		}
+		fmt.Fprintf(stdout, "Merge: %s\n", strings.Join(ps, " "))
+	}
+	if c.Actor != "" {
+		fmt.Fprintf(stdout, "Author: %s\n", c.Actor)
+	}
+	fmt.Fprintf(stdout, "\n    %s\n\n", c.Message)
+
+	var parentSnap graph.Snapshot
+	if len(c.Parents) > 0 {
+		if p, ok := log.Get(c.Parents[0]); ok {
+			parentSnap = p.Snapshot
+		}
+	}
+	printDelta(stdout, graph.Diff(contentOnly(parentSnap), contentOnly(c.Snapshot)))
+	return 0
+}
+
+func cmdTag(args []string, stdout, stderr io.Writer) int {
+	if !repoInitialized() {
+		fmt.Fprintln(stderr, "no repository; run 'got init'")
+		return 1
+	}
+	tags, err := loadTags()
+	if err != nil {
+		fmt.Fprintf(stderr, "tag: %v\n", err)
+		return 1
+	}
+	if len(args) == 0 {
+		names := make([]string, 0, len(tags))
+		for n := range tags {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			if b, err := hex.DecodeString(tags[n]); err == nil {
+				fmt.Fprintf(stdout, "%s\t%s\n", n, shortID(b))
+			}
+		}
+		return 0
+	}
+	name := args[0]
+	ref := currentBranch()
+	if len(args) == 2 {
+		ref = args[1]
+	} else if len(args) > 2 {
+		fmt.Fprintln(stderr, "tag: expected <name> [<commit-ish>]")
+		return 2
+	}
+	if _, exists := tags[name]; exists {
+		fmt.Fprintf(stderr, "tag: %q already exists\n", name)
+		return 1
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "tag: %v\n", err)
+		return 1
+	}
+	cid, ok := resolveCommit(state, log, ref)
+	if !ok {
+		fmt.Fprintf(stderr, "tag: unknown commit-ish %q\n", ref)
+		return 1
+	}
+	tags[name] = hex.EncodeToString(cid[:])
+	if err := saveTags(tags); err != nil {
+		fmt.Fprintf(stderr, "tag: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "tagged %q -> %s\n", name, shortID(cid[:]))
+	return 0
+}
+
+func cmdRevert(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "revert: expected <commit-ish>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "revert: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+	cid, ok := resolveCommit(state, log, args[0])
+	if !ok {
+		fmt.Fprintf(stderr, "revert: unknown commit-ish %q\n", args[0])
+		return 1
+	}
+	c, _ := log.Get(cid)
+
+	var parentSnap graph.Snapshot
+	if len(c.Parents) > 0 {
+		if p, ok := log.Get(c.Parents[0]); ok {
+			parentSnap = p.Snapshot
+		}
+	}
+	// Reverse delta (c -> parent) applied to the current working state undoes c.
+	reverse := graph.Diff(c.Snapshot, parentSnap)
+	revertedSnap := applySnapDelta(graph.EncodeSnapshot(state.Graph()), reverse)
+	reverted, err := revertedSnap.Build(schema())
+	if err != nil {
+		fmt.Fprintf(stderr, "revert: %v\n", err)
+		return 1
+	}
+
+	branch := currentBranch()
+	var parents []history.CommitID
+	if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(branch)); ok {
+		parents = []history.CommitID{commitFromVID(id)}
+	}
+	revState := repo.NewState(reverted, state.Namespace())
+	newC, err := newService().Commit(ctx, revState, log, "Revert: "+c.Message, "", parents)
+	if err != nil {
+		fmt.Fprintf(stderr, "revert: %v\n", err)
+		return 1
+	}
+	if err := saveHistory(log); err != nil {
+		fmt.Fprintf(stderr, "revert: %v\n", err)
+		return 1
+	}
+	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(newC.ID)); err != nil {
+		fmt.Fprintf(stderr, "revert: %v\n", err)
+		return 1
+	}
+	if err := saveState(revState); err != nil {
+		fmt.Fprintf(stderr, "revert: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "reverted %s: new commit %s\n", shortID(cid[:]), shortID(newC.ID[:]))
 	return 0
 }
 
