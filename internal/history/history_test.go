@@ -128,3 +128,29 @@ func TestMarshalRoundTrip(t *testing.T) {
 		t.Fatalf("expected 2 commits after round-trip, got %d", len(back.Commits()))
 	}
 }
+
+func TestMergeBase(t *testing.T) {
+	l := history.NewLog()
+	root := history.NewCommit(nil, "root", "a", nil, nil, snap(t, "r"))
+	left := history.NewCommit([]history.CommitID{root.ID}, "left", "a", nil, nil, snap(t, "r", "l"))
+	right := history.NewCommit([]history.CommitID{root.ID}, "right", "a", nil, nil, snap(t, "r", "rt"))
+	for _, c := range []history.Commit{root, left, right} {
+		if err := l.Add(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base, ok := l.MergeBase(left.ID, right.ID)
+	if !ok || base != root.ID {
+		t.Fatalf("merge-base(left,right) = %v ok=%v, want root", base, ok)
+	}
+	// An ancestor is its own merge-base with a descendant.
+	if base, ok := l.MergeBase(root.ID, left.ID); !ok || base != root.ID {
+		t.Fatalf("merge-base(root,left) should be root")
+	}
+	// Unrelated commit → no common ancestor.
+	orphan := history.NewCommit(nil, "orphan", "a", nil, nil, snap(t, "o"))
+	_ = l.Add(orphan)
+	if _, ok := l.MergeBase(left.ID, orphan.ID); ok {
+		t.Fatal("unrelated commits should have no merge-base")
+	}
+}

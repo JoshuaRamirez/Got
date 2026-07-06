@@ -231,31 +231,6 @@ func TestPersistenceAcrossInvocations(t *testing.T) {
 
 // --- merge / merge3 / materialize ---
 
-func TestMergeCommand(t *testing.T) {
-	initRepo(t)
-	runCLI(t, "add-vertex", "a", "--type", "Artifact")
-	runCLI(t, "add-vertex", "b", "--type", "Artifact")
-	code, out, errs := runCLI(t, "merge", "a", "b")
-	if code != 0 {
-		t.Fatalf("merge failed: %s", errs)
-	}
-	if !strings.Contains(out, "merged 2 vertex(es)") || !strings.Contains(out, "a, b") {
-		t.Fatalf("expected merged union of a,b, got %q", out)
-	}
-	if !strings.Contains(out, "witness:") {
-		t.Fatalf("expected a witness line, got %q", out)
-	}
-}
-
-func TestMergeUnknownVertex(t *testing.T) {
-	initRepo(t)
-	runCLI(t, "add-vertex", "a", "--type", "Artifact")
-	code, _, errs := runCLI(t, "merge", "a", "ghost")
-	if code != 1 || !strings.Contains(errs, "unknown vertex") {
-		t.Fatalf("expected unknown-vertex error, code=%d err=%q", code, errs)
-	}
-}
-
 // merge3 honors a one-sided deletion: art deleted on left, unchanged on right.
 func TestMerge3HonorsDeletion(t *testing.T) {
 	initRepo(t)
@@ -528,5 +503,79 @@ func TestFirstClassBranchNotDirty(t *testing.T) {
 	_, out, _ := runCLI(t, "status")
 	if !strings.Contains(out, "clean") {
 		t.Fatalf("creating a first-class branch should not dirty status: %q", out)
+	}
+}
+
+// --- semantic merge (UC-U24) ---
+
+func TestMergeSemanticDivergent(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "base", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "base")
+	runCLI(t, "checkout", "-b", "feature")
+	runCLI(t, "add-vertex", "feat", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "feature work")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "add-vertex", "mainw", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "main work")
+
+	code, out, errs := runCLI(t, "merge", "feature")
+	if code != 0 {
+		t.Fatalf("merge failed: %s %s", errs, out)
+	}
+	if !strings.Contains(out, "merged") {
+		t.Fatalf("expected a merge commit, got %q", out)
+	}
+	// Working tree has both sides.
+	_, out, _ = runCLI(t, "list", "vertices")
+	for _, n := range []string{"base", "feat", "mainw"} {
+		if !strings.Contains(out, n) {
+			t.Fatalf("merged tree should contain %q: %q", n, out)
+		}
+	}
+	// Log shows the merge commit atop both lines.
+	_, out, _ = runCLI(t, "log")
+	if !strings.Contains(out, "merge feature into main") {
+		t.Fatalf("expected merge commit in log: %q", out)
+	}
+}
+
+func TestMergeFastForward(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	runCLI(t, "checkout", "-b", "topic")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "b")
+	runCLI(t, "checkout", "main")
+	code, out, _ := runCLI(t, "merge", "topic")
+	if code != 0 || !strings.Contains(out, "fast-forward") {
+		t.Fatalf("expected fast-forward, code=%d out=%q", code, out)
+	}
+}
+
+func TestMergeBaseCmd(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	runCLI(t, "checkout", "-b", "x")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "b")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "add-vertex", "c", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "c")
+	code, out, _ := runCLI(t, "merge-base", "main", "x")
+	if code != 0 || len(strings.TrimSpace(out)) < 12 {
+		t.Fatalf("expected a merge-base id, got %q", out)
+	}
+}
+
+func TestMergeSelfRefused(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	code, _, errs := runCLI(t, "merge", "main")
+	if code != 1 || !strings.Contains(errs, "into itself") {
+		t.Fatalf("expected self-merge refusal, code=%d err=%q", code, errs)
 	}
 }
