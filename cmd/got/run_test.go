@@ -975,3 +975,46 @@ func TestRebaseUpToDate(t *testing.T) {
 		t.Fatalf("expected up-to-date, out=%q", out)
 	}
 }
+
+// --- merge conflict + strategy (UC-U32) ---
+
+func setupConflict(t *testing.T) {
+	t.Helper()
+	initRepo(t)
+	runCLI(t, "add-vertex", "base", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "base")
+	runCLI(t, "checkout", "-b", "left")
+	runCLI(t, "add-vertex", "X", "--type", "Artifact", "--attr", "s=left")
+	runCLI(t, "commit", "-m", "left X")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "add-vertex", "X", "--type", "Artifact", "--attr", "s=main")
+	runCLI(t, "commit", "-m", "main X")
+}
+
+func TestMergeConflictAborts(t *testing.T) {
+	setupConflict(t)
+	code, out, _ := runCLI(t, "merge", "left")
+	if code != 1 || !strings.Contains(out, "conflict") || !strings.Contains(out, "--ours") {
+		t.Fatalf("plain merge should abort with a hint: code=%d out=%q", code, out)
+	}
+}
+
+func TestMergeOursTheirs(t *testing.T) {
+	setupConflict(t)
+	if code, out, errs := runCLI(t, "merge", "--ours", "left"); code != 0 || !strings.Contains(out, "merged") {
+		t.Fatalf("merge --ours should resolve: %s %s", errs, out)
+	}
+	// A second repo for --theirs.
+	setupConflict(t)
+	if code, out, _ := runCLI(t, "merge", "--theirs", "left"); code != 0 || !strings.Contains(out, "merged") {
+		t.Fatalf("merge --theirs should resolve: %q", out)
+	}
+}
+
+func TestMergeOursTheirsExclusive(t *testing.T) {
+	setupConflict(t)
+	code, _, _ := runCLI(t, "merge", "--ours", "--theirs", "left")
+	if code != 2 {
+		t.Fatalf("--ours + --theirs should be rejected, got %d", code)
+	}
+}

@@ -134,7 +134,7 @@ usage:
   got diff [<branch>]          (last commit vs its parent; default HEAD)
   got diff <branchA> <branchB> (two branch heads)
   got list vertices|edges
-  got merge <branch>                     (semantic merge into the current branch)
+  got merge <branch> [--ours|--theirs]   (semantic merge; strategy resolves conflicts)
   got merge-base <branchA> <branchB>     (nearest common commit)
   got merge3 <ancestor> <left> <right>   (low-level three-way frontier merge)
   got materialize                        (manifest bundle of the whole graph)
@@ -1126,8 +1126,15 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var actor string
+	var ours, theirs bool
 	fs.StringVar(&actor, "actor", "", "merge author")
+	fs.BoolVar(&ours, "ours", false, "on conflict, keep the current branch's version")
+	fs.BoolVar(&theirs, "theirs", false, "on conflict, take the merged branch's version")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if ours && theirs {
+		fmt.Fprintln(stderr, "merge: --ours and --theirs are mutually exclusive")
 		return 2
 	}
 	if fs.NArg() != 1 {
@@ -1202,21 +1209,32 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 	curCommit, _ := log.Get(curC)
 	otherCommit, _ := log.Get(otherC)
 
-	mergedGraph, mr, err := newService().MergeStates(ctx, schema(), baseSnap, curCommit.Snapshot, otherCommit.Snapshot)
-	if err != nil {
-		fmt.Fprintf(stderr, "merge: %v\n", err)
-		return 1
-	}
-	if len(mr.Conflicts) > 0 {
-		fmt.Fprintf(stdout, "merge aborted: %d conflict(s)\n", len(mr.Conflicts))
-		for _, c := range mr.Conflicts {
-			if d, ok := c.(interface{ Detail() string }); ok {
-				fmt.Fprintf(stdout, "  %s: %s\n", c.Kind(), d.Detail())
-			} else {
-				fmt.Fprintf(stdout, "  %s\n", c.Kind())
-			}
+	var mergedGraph graph.Graph
+	if ours || theirs {
+		// Resolve conflicts by strategy instead of aborting.
+		mergedGraph, err = newService().MergeStatesStrategy(schema(), baseSnap, curCommit.Snapshot, otherCommit.Snapshot, ours)
+		if err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
 		}
-		return 1
+	} else {
+		var mr composition.MergeResult
+		mergedGraph, mr, err = newService().MergeStates(ctx, schema(), baseSnap, curCommit.Snapshot, otherCommit.Snapshot)
+		if err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
+		}
+		if len(mr.Conflicts) > 0 {
+			fmt.Fprintf(stdout, "merge aborted: %d conflict(s) (use --ours or --theirs to resolve)\n", len(mr.Conflicts))
+			for _, c := range mr.Conflicts {
+				if d, ok := c.(interface{ Detail() string }); ok {
+					fmt.Fprintf(stdout, "  %s: %s\n", c.Kind(), d.Detail())
+				} else {
+					fmt.Fprintf(stdout, "  %s\n", c.Kind())
+				}
+			}
+			return 1
+		}
 	}
 
 	mergedState := repo.NewState(mergedGraph, state.Namespace())

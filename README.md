@@ -51,6 +51,7 @@ go build -o got ./cmd/got
 ./got status              # current branch + uncommitted changes
 ./got checkout -b feature # create + switch branch (working tree follows HEAD)
 ./got merge feature       # semantic three-way merge into current branch
+./got merge feature --ours # on conflict, keep our side per node/edge (--theirs takes theirs)
 ./got tag v1 ; ./got show v1 ; ./got revert v1   # name / inspect / undo a commit
 ./got blame report        # which commit introduced / last changed a node (per-node, not per-line)
 ./got rebase main         # replay the current branch's commits onto another (linear)
