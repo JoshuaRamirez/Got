@@ -34,6 +34,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U25](user/UC-U25-show-tag-revert.md) | Inspect, tag, and revert commits | Developer | `cmd/got` |
 | [UC-U26](user/UC-U26-reset-restore.md) | Reset a branch and restore the working graph | Developer | `cmd/got` |
 | [UC-U27](user/UC-U27-branch-delete-rename.md) | Delete and rename branches | Developer | `cmd/got`, `namespace` |
+| [UC-U28](user/UC-U28-blame-node-history.md) | Blame a node and query its history | Developer / Auditor | `cmd/got`, `history` |
 
 ## System use cases (sub-function level)
 
