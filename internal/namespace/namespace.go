@@ -36,6 +36,10 @@ type Store interface {
 	BindRef(ctx context.Context, name RefName, id identity.VertexID) error
 	ResolveRef(ctx context.Context, name RefName) (identity.VertexID, bool)
 
+	// DeleteRef removes a ref binding. Deleting an absent ref is a no-op
+	// (idempotent). Used by branch delete/rename.
+	DeleteRef(ctx context.Context, name RefName) error
+
 	BindAlias(ctx context.Context, alias Alias, id identity.VertexID) error
 	ResolveAlias(ctx context.Context, alias Alias) (identity.VertexID, bool)
 

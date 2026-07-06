@@ -70,6 +70,8 @@ When a UC is retired:
 
 | [UC-U26](user/UC-U26-reset-restore.md) | Reset a branch and restore the working graph | Verified | `cmd/got` (`reset`, `restore`) | `cmd/got/run_test.go` | 2026-06-16 | reset [--hard] <commit-ish> repoints the current branch tip (--hard also rewrites the working graph); restore [<commit-ish>] rewrites the working graph to a commit (default HEAD), discarding uncommitted changes. Tests: reset --hard (drops later commit + clean tree), soft reset (keeps working, status dirty), restore (discards uncommitted). |
 
+| [UC-U27](user/UC-U27-branch-delete-rename.md) | Delete and rename branches | Verified | `cmd/got` (`branch -d`, `branch -m`), `internal/namespace` (`DeleteRef` on Store/memStore/FileStore/HTTPStore + handler) | `cmd/got/run_test.go`, `internal/namespace/*_test.go` | 2026-06-16 | branch -d removes the commit pointer (DeleteRef) + first-class vertex (refused for current branch); branch -m moves the pointer + HEAD, drops the old vertex. DeleteRef added across all Store impls (idempotent, durable in FileStore, routed in HTTP handler). Tests: delete + gone, delete-current-refused, rename + old-gone; namespace mem/file/http DeleteRef. |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -88,7 +90,7 @@ When a UC is retired:
 | [UC-S12](system/UC-S12-check-policy-aggregate.md) | Check the aggregate decision over a policy set | Verified | `internal/governance/engine.go` (`Check`) | `internal/governance/governance_test.go` | 2026-05-05 | Aggregate rule (Unsat dominates, then Unknown), empty policy set, obligation concatenation, policy-error wrap, ctx cancel covered. |
 | [UC-S13](system/UC-S13-gate-release.md) | Gate a frontier for release | Verified | `internal/governance/engine.go` (`GateRelease`) | `internal/governance/governance_test.go` | 2026-05-05 | Sat + no obligations → true, outstanding obligations block, Unsat blocks, empty policies → trivially true. |
 | [UC-S14](system/UC-S14-materialize-for-target.md) | Materialize a view for a specific target | Verified | `internal/realization/engine.go` (`DefaultEngine`, `ManifestTarget`) | `internal/realization/realization_test.go` | 2026-05-05 | Manifest materializer, custom registration, empty view, unsupported-target failure path, ctx cancel covered. |
-| [UC-S15](system/UC-S15-bind-name.md) | Bind a name to a vertex | Verified | `internal/namespace/mem.go` (`BindRef`/`BindAlias`/`BindProjection`) | `internal/namespace/namespace_test.go` | 2026-05-05 | All three name kinds exercised; rebind-overwrite path covered. |
+| [UC-S15](system/UC-S15-bind-name.md) | Bind a name to a vertex | Verified | `internal/namespace/mem.go` (`BindRef`/`BindAlias`/`BindProjection`) | `internal/namespace/namespace_test.go` | 2026-05-05 | All three name kinds exercised; rebind-overwrite path covered. DeleteRef added (remove a ref; idempotent) across memStore/FileStore/HTTPStore for branch delete/rename. |
 | [UC-S16](system/UC-S16-resolve-binding.md) | Resolve a name binding | Verified | `internal/namespace/mem.go` (`Resolve*`) | `internal/namespace/namespace_test.go` | 2026-05-05 | Bound + unbound paths covered. |
 | [UC-S17](system/UC-S17-compute-content-id.md) | Compute a content-addressed identifier | Verified | `internal/identity/sha256.go` | `internal/identity/identity_test.go` | 2026-05-05 | SHA-256-backed factory; canonical-bytes contract covered. |
 | [UC-S18](system/UC-S18-check-ontology-admissibility.md) | Check whether an edge or hyperedge is admissible | Verified | `internal/ontology/schema.go` | `internal/ontology/schema_test.go` | 2026-05-05 | Edge and hyperedge admissibility tables exercised. |
@@ -108,11 +110,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 26 | 0 | 26 |
+| User | 0 | 0 | 0 | 27 | 0 | 27 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **53** | **0** | **53** |
+| **Total** | **0** | **0** | **0** | **54** | **0** | **54** |
 
-**Verified coverage: 53 / 53 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 54 / 54 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added

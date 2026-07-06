@@ -134,6 +134,16 @@ func (s *FileStore) ResolveRef(_ context.Context, name RefName) (identity.Vertex
 	return id, ok
 }
 
+func (s *FileStore) DeleteRef(_ context.Context, name RefName) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.refs[name]; !ok {
+		return nil
+	}
+	delete(s.refs, name)
+	return s.save()
+}
+
 func (s *FileStore) BindAlias(_ context.Context, name Alias, id identity.VertexID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

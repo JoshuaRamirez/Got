@@ -104,6 +104,7 @@ usage:
   got bind <ref> <vertex>
   got resolve <ref>
   got branch <name> [--from <parent>] [--tip <vertex>] [--desc <text>]
+  got branch -d <name> | got branch -m <old> <new>
   got branches
   got branch-log <name>
   got status
@@ -482,9 +483,19 @@ func cmdResolve(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdBranch(args []string, stdout, stderr io.Writer) int {
+	// Flag-first forms: `branch -d <name>` (delete), `branch -m <old> <new>`
+	// (rename). Otherwise the name-first create form.
+	if len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "-d", "--delete":
+			return cmdBranchDelete(args[1:], stdout, stderr)
+		case "-m", "--rename":
+			return cmdBranchRename(args[1:], stdout, stderr)
+		}
+	}
 	name, rest, ok := splitName(args)
 	if !ok {
-		fmt.Fprintln(stderr, "branch: expected '<name> [--from <parent>] [--tip <vertex>] [--desc <text>]'")
+		fmt.Fprintln(stderr, "branch: expected '<name> [--from <parent>] [--tip <vertex>] [--desc <text>]', '-d <name>', or '-m <old> <new>'")
 		return 2
 	}
 	fs := flag.NewFlagSet("branch", flag.ContinueOnError)
@@ -534,6 +545,126 @@ func cmdBranch(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "created branch %q\n", b.Name)
 	}
 	return 0
+}
+
+func cmdBranchDelete(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "branch -d: expected <name>")
+		return 2
+	}
+	name := args[0]
+	if name == currentBranch() {
+		fmt.Fprintf(stderr, "branch -d: cannot delete the current branch %q\n", name)
+		return 1
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if !branchExists(state, name) {
+		fmt.Fprintf(stderr, "branch -d: no such branch %q\n", name)
+		return 1
+	}
+	ctx := context.Background()
+	if err := state.Namespace().DeleteRef(ctx, commitRefName(name)); err != nil {
+		fmt.Fprintf(stderr, "branch -d: %v\n", err)
+		return 1
+	}
+	// Remove the first-class branch vertex if present (invisible to content
+	// diff/status, which exclude BranchSelector vertices).
+	if _, ok := state.Graph().Vertex(repo.BranchVID(name)); ok {
+		g, err := removeVertexAndEdges(state.Graph(), repo.BranchVID(name))
+		if err != nil {
+			fmt.Fprintf(stderr, "branch -d: %v\n", err)
+			return 1
+		}
+		if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+			fmt.Fprintf(stderr, "branch -d: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Fprintf(stdout, "deleted branch %q\n", name)
+	return 0
+}
+
+func cmdBranchRename(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 2 {
+		fmt.Fprintln(stderr, "branch -m: expected <old> <new>")
+		return 2
+	}
+	old, newName := args[0], args[1]
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if !branchExists(state, old) {
+		fmt.Fprintf(stderr, "branch -m: no such branch %q\n", old)
+		return 1
+	}
+	if branchExists(state, newName) {
+		fmt.Fprintf(stderr, "branch -m: branch %q already exists\n", newName)
+		return 1
+	}
+	ctx := context.Background()
+	if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(old)); ok {
+		if err := state.Namespace().BindRef(ctx, commitRefName(newName), id); err != nil {
+			fmt.Fprintf(stderr, "branch -m: %v\n", err)
+			return 1
+		}
+	}
+	if err := state.Namespace().DeleteRef(ctx, commitRefName(old)); err != nil {
+		fmt.Fprintf(stderr, "branch -m: %v\n", err)
+		return 1
+	}
+	if currentBranch() == old {
+		if err := setHEAD(newName); err != nil {
+			fmt.Fprintf(stderr, "branch -m: %v\n", err)
+			return 1
+		}
+	}
+	// The first-class branch vertex (if any) is keyed by name; drop the old
+	// one so `branches` no longer lists the old name. Re-create it under the
+	// new name with `got branch <new>` if you want its metadata/lineage back.
+	if _, ok := state.Graph().Vertex(repo.BranchVID(old)); ok {
+		g, err := removeVertexAndEdges(state.Graph(), repo.BranchVID(old))
+		if err != nil {
+			fmt.Fprintf(stderr, "branch -m: %v\n", err)
+			return 1
+		}
+		if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+			fmt.Fprintf(stderr, "branch -m: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Fprintf(stdout, "renamed branch %q -> %q\n", old, newName)
+	return 0
+}
+
+// removeVertexAndEdges rebuilds g without the given vertex and any edge
+// touching it, returning the validated result.
+func removeVertexAndEdges(g graph.Graph, id identity.VertexID) (graph.Graph, error) {
+	b := graph.NewBuilder(schema())
+	for _, v := range g.Vertices() {
+		if v.ID == id {
+			continue
+		}
+		b.AddVertex(v)
+	}
+	for _, e := range g.Edges() {
+		if e.From == id || e.To == id {
+			continue
+		}
+		if err := b.AddEdge(e); err != nil {
+			return nil, err
+		}
+	}
+	out := b.Build()
+	if err := out.Validate(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func cmdBranches(args []string, stdout, stderr io.Writer) int {

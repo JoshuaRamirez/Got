@@ -138,3 +138,20 @@ func TestFileStoreConcurrentWriters(t *testing.T) {
 		}
 	}
 }
+
+func TestFileStoreDeleteDurable(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "ns.json")
+	s := mustFileStore(t, path)
+	if err := s.BindRef(ctx, "main", fvid("t")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteRef(ctx, "main"); err != nil {
+		t.Fatal(err)
+	}
+	// Durable: a reopened store also lacks the ref.
+	s2 := mustFileStore(t, path)
+	if _, ok := s2.ResolveRef(ctx, "main"); ok {
+		t.Fatal("deleted ref should not survive reopen")
+	}
+}
