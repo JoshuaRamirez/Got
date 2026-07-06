@@ -156,6 +156,45 @@ func setHEAD(branch string) error {
 	return os.WriteFile(headPath(), []byte(branch+"\n"), 0o644)
 }
 
+// --- stash (a stack of saved working states) ---
+
+type stashEntry struct {
+	Branch   string         `json:"branch"`
+	Snapshot graph.Snapshot `json:"snapshot"`
+}
+
+func stashPath() string { return filepath.Join(stateDir(), "stash.json") }
+
+func loadStashes() ([]stashEntry, error) {
+	b, err := os.ReadFile(stashPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var s []stashEntry
+	if err := json.Unmarshal(b, &s); err != nil {
+		return nil, fmt.Errorf("corrupt stash file: %w", err)
+	}
+	return s, nil
+}
+
+func saveStashes(s []stashEntry) error {
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := stashPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, stashPath())
+}
+
 // --- tags (lightweight commit names) ---
 
 func tagsPath() string { return filepath.Join(stateDir(), "tags.json") }

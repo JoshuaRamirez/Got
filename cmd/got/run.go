@@ -78,6 +78,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCherryPick(rest, stdout, stderr)
 	case "amend":
 		return cmdAmend(rest, stdout, stderr)
+	case "stash":
+		return cmdStash(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -120,6 +122,7 @@ usage:
   got blame <name>             (which commit introduced / last changed a node)
   got cherry-pick <commit-ish> (apply a commit's change onto the current branch)
   got amend [-m <message>]     (replace the last commit with the working state)
+  got stash [push|pop|list]    (save/restore uncommitted working changes)
   got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
   got tag <name> [<commit-ish>] | got tags
   got revert <commit-ish>      (new commit undoing the target)
@@ -1500,6 +1503,101 @@ func cmdRestore(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "restored working graph to %s\n", shortID(cid[:]))
 	return 0
+}
+
+func cmdStash(args []string, stdout, stderr io.Writer) int {
+	sub := "push"
+	if len(args) == 1 {
+		sub = args[0]
+	} else if len(args) > 1 {
+		fmt.Fprintln(stderr, "stash: expected push|pop|list")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "stash: %v\n", err)
+		return 1
+	}
+	stashes, err := loadStashes()
+	if err != nil {
+		fmt.Fprintf(stderr, "stash: %v\n", err)
+		return 1
+	}
+	branch := currentBranch()
+
+	switch sub {
+	case "push":
+		headSnap, _ := headSnapshot(state, log, branch)
+		cur := graph.EncodeSnapshot(state.Graph())
+		if graph.Diff(contentOnly(headSnap), contentOnly(cur)).Empty() {
+			fmt.Fprintln(stdout, "nothing to stash, working graph clean")
+			return 0
+		}
+		stashes = append(stashes, stashEntry{Branch: branch, Snapshot: cur})
+		if err := saveStashes(stashes); err != nil {
+			fmt.Fprintf(stderr, "stash: %v\n", err)
+			return 1
+		}
+		// Reset the working graph to HEAD.
+		g, err := headStateGraph(headSnap)
+		if err != nil {
+			fmt.Fprintf(stderr, "stash: %v\n", err)
+			return 1
+		}
+		if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+			fmt.Fprintf(stderr, "stash: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "stashed working changes (%d stash(es))\n", len(stashes))
+		return 0
+
+	case "pop":
+		if len(stashes) == 0 {
+			fmt.Fprintln(stderr, "stash: no stashes")
+			return 1
+		}
+		entry := stashes[len(stashes)-1]
+		stashes = stashes[:len(stashes)-1]
+		g, err := entry.Snapshot.Build(schema())
+		if err != nil {
+			fmt.Fprintf(stderr, "stash: %v\n", err)
+			return 1
+		}
+		if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+			fmt.Fprintf(stderr, "stash: %v\n", err)
+			return 1
+		}
+		if err := saveStashes(stashes); err != nil {
+			fmt.Fprintf(stderr, "stash: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "restored stash (%d remaining)\n", len(stashes))
+		return 0
+
+	case "list":
+		for i := len(stashes) - 1; i >= 0; i-- {
+			fmt.Fprintf(stdout, "stash@{%d}: on %s\n", len(stashes)-1-i, stashes[i].Branch)
+		}
+		return 0
+
+	default:
+		fmt.Fprintln(stderr, "stash: expected push|pop|list")
+		return 2
+	}
+}
+
+// headStateGraph builds the graph for a branch's head snapshot, or an empty
+// graph when the branch has no commit.
+func headStateGraph(headSnap graph.Snapshot) (graph.Graph, error) {
+	if len(headSnap.Vertices) == 0 && len(headSnap.Edges) == 0 && len(headSnap.Hyperedges) == 0 {
+		return graph.NewGraph(schema()), nil
+	}
+	return headSnap.Build(schema())
 }
 
 func cmdCherryPick(args []string, stdout, stderr io.Writer) int {
