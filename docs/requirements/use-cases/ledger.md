@@ -88,6 +88,7 @@ When a UC is retired:
 | [UC-S22](system/UC-S22-persist-namespace.md) | Persist namespace bindings to durable storage | Verified | `internal/namespace/file.go` (`FileStore`) | `internal/namespace/file_test.go` | 2026-06-16 | Durable, concurrency-safe Store backed by an atomic JSON file. All three name kinds bind/resolve; durability across reopen; rebind-overwrite; corrupt-file error; unbound; 16-goroutine concurrent-writer test under -race. Only the mutable namespace is persisted (graph is content-addressed/reconstructable). |
 | [UC-S23](system/UC-S23-serialize-graph.md) | Serialize and deserialize a graph | Verified | `internal/graph/codec.go` (`EncodeSnapshot`, `Snapshot.Build`, `Marshal`, `Unmarshal`) | `internal/graph/codec_test.go` | 2026-06-16 | Lossless snapshot/JSON codec carrying all vertex/edge/hyperedge fields (hex IDs). Round-trip (incl. attrs/time/trust/edges/hyperedge) and JSON round-trip; empty; validate-on-load runs graph.Validate so malformed-ID, missing-endpoint, and inadmissible snapshots are rejected on decode. |
 | [UC-S24](system/UC-S24-evaluate-graph-query.md) | Evaluate a graph query | Verified | `internal/graph/query.go` (`ByType`, `ByAttr`, `And`, `Or`, `matchVertices`), `internal/graph/mem.go` (`Query`) | `internal/graph/query_test.go` | 2026-06-16 | Composable query language: ByType, ByAttr (deep-equality, absent-key non-match), And (intersection), Or (union), nesting, empty composites, induced-edge inclusion, and ErrQueryUnsupported for unknown types (incl. propagation through composites). |
+| [UC-S26](system/UC-S26-commit-history.md) | Record operation-first commit history | Verified | `internal/history/history.go` (`Commit`, `Log`, `NewCommit`, `Ancestors`, `Marshal`/`Unmarshal`) | `internal/history/history_test.go` | 2026-06-16 | Operation-first commit DAG: each commit records its consumed/produced delta + resulting snapshot + parents + actor + message; content-addressed CommitID (delta excluded from identity). Merge commits (multi-parent), BFS ancestry walk, unknown-parent/unknown-commit failures, JSON round-trip. The non-lossy alternative to git's snapshot-only commits. |
 | [UC-S25](system/UC-S25-remote-namespace.md) | Bind and resolve names over a network | Verified | `internal/namespace/http.go` (`HTTPStore`, `NewHTTPHandler`) | `internal/namespace/http_test.go` | 2026-06-16 | Network-transparent Store: HTTP client + server over JSON, ctx threaded onto each request. httptest round-trip for all three name kinds (bind lands in backing store), unbound → not-found, URL-escaped special-char names, and cancelled-ctx (bind errors, resolve → not-found). Realizes the remote backing the Store's ctx parameter anticipates. |
 
 ## Summary
@@ -97,10 +98,10 @@ As of 2026-06-16:
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
 | User | 0 | 0 | 0 | 21 | 0 | 21 |
-| System | 0 | 0 | 0 | 25 | 0 | 25 |
-| **Total** | **0** | **0** | **0** | **46** | **0** | **46** |
+| System | 0 | 0 | 0 | 26 | 0 | 26 |
+| **Total** | **0** | **0** | **0** | **47** | **0** | **47** |
 
-**Verified coverage: 46 / 46 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 47 / 47 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added
