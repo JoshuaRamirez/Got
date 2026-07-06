@@ -911,3 +911,67 @@ func TestStashPopEmpty(t *testing.T) {
 		t.Fatalf("expected no-stashes error, code=%d err=%q", code, errs)
 	}
 }
+
+// --- rebase (UC-U31) ---
+
+func TestRebase(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "base", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "base")
+	runCLI(t, "checkout", "-b", "feature")
+	runCLI(t, "add-vertex", "f1", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "f1")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "add-vertex", "m1", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "m1")
+
+	runCLI(t, "checkout", "feature")
+	if code, out, errs := runCLI(t, "rebase", "main"); code != 0 || !strings.Contains(out, "rebased") {
+		t.Fatalf("rebase: %s %s", errs, out)
+	}
+	// Working tree now has main's m1 as well as feature's f1.
+	_, out, _ := runCLI(t, "list", "vertices")
+	for _, n := range []string{"base", "m1", "f1"} {
+		if !strings.Contains(out, n) {
+			t.Fatalf("rebased tree should contain %q: %q", n, out)
+		}
+	}
+	// History is linear and includes m1 (the new base) below f1.
+	_, out, _ = runCLI(t, "log")
+	if !strings.Contains(out, "m1") || !strings.Contains(out, "f1") {
+		t.Fatalf("rebased log should include m1 and f1: %q", out)
+	}
+	if strings.Index(out, "f1") > strings.Index(out, "m1") {
+		t.Fatalf("f1 should sit above m1 after rebase: %q", out)
+	}
+}
+
+func TestRebaseFastForward(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	runCLI(t, "checkout", "-b", "feature") // same tip as main
+	runCLI(t, "checkout", "main")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "b")
+	// feature is behind main → rebase fast-forwards.
+	runCLI(t, "checkout", "feature")
+	code, out, _ := runCLI(t, "rebase", "main")
+	if code != 0 || !strings.Contains(out, "fast-forward") {
+		t.Fatalf("expected fast-forward, out=%q", out)
+	}
+}
+
+func TestRebaseUpToDate(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	runCLI(t, "checkout", "-b", "feature")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "b")
+	// main is an ancestor of feature → nothing to rebase.
+	code, out, _ := runCLI(t, "rebase", "main")
+	if code != 0 || !strings.Contains(out, "up to date") {
+		t.Fatalf("expected up-to-date, out=%q", out)
+	}
+}

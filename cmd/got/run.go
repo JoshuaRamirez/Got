@@ -80,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdAmend(rest, stdout, stderr)
 	case "stash":
 		return cmdStash(rest, stdout, stderr)
+	case "rebase":
+		return cmdRebase(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -123,6 +125,7 @@ usage:
   got cherry-pick <commit-ish> (apply a commit's change onto the current branch)
   got amend [-m <message>]     (replace the last commit with the working state)
   got stash [push|pop|list]    (save/restore uncommitted working changes)
+  got rebase <onto>            (replay the current branch's commits onto another)
   got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
   got tag <name> [<commit-ish>] | got tags
   got revert <commit-ish>      (new commit undoing the target)
@@ -1598,6 +1601,133 @@ func headStateGraph(headSnap graph.Snapshot) (graph.Graph, error) {
 		return graph.NewGraph(schema()), nil
 	}
 	return headSnap.Build(schema())
+}
+
+func cmdRebase(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "rebase: expected <onto>")
+		return 2
+	}
+	onto := args[0]
+	cur := currentBranch()
+	if onto == cur {
+		fmt.Fprintln(stderr, "rebase: cannot rebase a branch onto itself")
+		return 1
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "rebase: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+	curTipID, ok := state.Namespace().ResolveRef(ctx, commitRefName(cur))
+	if !ok {
+		fmt.Fprintf(stderr, "rebase: current branch %q has no commits\n", cur)
+		return 1
+	}
+	ontoTipID, ok := state.Namespace().ResolveRef(ctx, commitRefName(onto))
+	if !ok {
+		fmt.Fprintf(stderr, "rebase: branch %q has no commits\n", onto)
+		return 1
+	}
+	curTip, ontoTip := commitFromVID(curTipID), commitFromVID(ontoTipID)
+	if curTip == ontoTip {
+		fmt.Fprintln(stdout, "already up to date")
+		return 0
+	}
+	base, hasBase := log.MergeBase(curTip, ontoTip)
+	if !hasBase {
+		fmt.Fprintln(stderr, "rebase: no common ancestor; cannot rebase")
+		return 1
+	}
+	if base == ontoTip {
+		fmt.Fprintln(stdout, "already up to date")
+		return 0
+	}
+	if base == curTip {
+		// Current is an ancestor of onto: fast-forward.
+		ontoCommit, _ := log.Get(ontoTip)
+		g, err := ontoCommit.Snapshot.Build(schema())
+		if err != nil {
+			fmt.Fprintf(stderr, "rebase: %v\n", err)
+			return 1
+		}
+		if err := state.Namespace().BindRef(ctx, commitRefName(cur), ontoTipID); err != nil {
+			fmt.Fprintf(stderr, "rebase: %v\n", err)
+			return 1
+		}
+		if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+			fmt.Fprintf(stderr, "rebase: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "fast-forward: %s onto %s\n", cur, shortID(ontoTipID[:]))
+		return 0
+	}
+
+	// Collect current's commits above the merge base, oldest-first.
+	anc, err := log.Ancestors(curTip)
+	if err != nil {
+		fmt.Fprintf(stderr, "rebase: %v\n", err)
+		return 1
+	}
+	var replay []history.Commit
+	for _, c := range anc {
+		if c.ID == base {
+			break
+		}
+		replay = append(replay, c)
+	}
+	for i, j := 0, len(replay)-1; i < j; i, j = i+1, j-1 {
+		replay[i], replay[j] = replay[j], replay[i]
+	}
+
+	svc := newService()
+	running := ontoTip
+	runningCommit, _ := log.Get(ontoTip)
+	runningSnap := runningCommit.Snapshot
+	var finalGraph graph.Graph
+	for _, c := range replay {
+		var parentSnap graph.Snapshot
+		if len(c.Parents) > 0 {
+			if p, ok := log.Get(c.Parents[0]); ok {
+				parentSnap = p.Snapshot
+			}
+		}
+		forward := graph.Diff(parentSnap, c.Snapshot)
+		newSnap := applySnapDelta(runningSnap, forward)
+		g, err := newSnap.Build(schema())
+		if err != nil {
+			fmt.Fprintf(stderr, "rebase: %v\n", err)
+			return 1
+		}
+		newC, err := svc.Commit(ctx, repo.NewState(g, state.Namespace()), log, c.Message, c.Actor, []history.CommitID{running})
+		if err != nil {
+			fmt.Fprintf(stderr, "rebase: %v\n", err)
+			return 1
+		}
+		running = newC.ID
+		runningSnap = newC.Snapshot
+		finalGraph = g
+	}
+	if err := saveHistory(log); err != nil {
+		fmt.Fprintf(stderr, "rebase: %v\n", err)
+		return 1
+	}
+	if err := state.Namespace().BindRef(ctx, commitRefName(cur), vidFromCommit(running)); err != nil {
+		fmt.Fprintf(stderr, "rebase: %v\n", err)
+		return 1
+	}
+	if err := saveState(repo.NewState(finalGraph, state.Namespace())); err != nil {
+		fmt.Fprintf(stderr, "rebase: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "rebased %d commit(s) of %s onto %s\n", len(replay), cur, onto)
+	return 0
 }
 
 func cmdCherryPick(args []string, stdout, stderr io.Writer) int {
