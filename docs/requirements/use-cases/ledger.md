@@ -78,6 +78,8 @@ When a UC is retired:
 
 | [UC-U30](user/UC-U30-stash.md) | Stash uncommitted working changes | Verified | `cmd/got` (`stash push`/`pop`/`list`) | `cmd/got/run_test.go` | 2026-06-16 | stash push saves the working snapshot onto a LIFO stack (stash.json) and resets the working graph to HEAD; pop restores the top; list shows the stack. Tests: stash+clean+list+pop restores; nothing-to-stash; pop-empty. |
 
+| [UC-U31](user/UC-U31-rebase.md) | Rebase a branch onto another | Verified | `cmd/got` (`rebase`) | `cmd/got/run_test.go` | 2026-06-16 | rebase <onto>: replay the current branch's commits above the merge base onto <onto>'s tip as new commits (linear history rewrite); fast-forward when current is an ancestor, up-to-date when onto is; refuse unrelated histories / self. Tests: rebase (linear m1<-f1 + working tree), fast-forward, up-to-date. |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -116,11 +118,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 30 | 0 | 30 |
+| User | 0 | 0 | 0 | 31 | 0 | 31 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **57** | **0** | **57** |
+| **Total** | **0** | **0** | **0** | **58** | **0** | **58** |
 
-**Verified coverage: 57 / 57 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 58 / 58 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added

@@ -37,6 +37,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U28](user/UC-U28-blame-node-history.md) | Blame a node and query its history | Developer / Auditor | `cmd/got`, `history` |
 | [UC-U29](user/UC-U29-cherry-pick-amend.md) | Cherry-pick and amend commits | Developer | `cmd/got` |
 | [UC-U30](user/UC-U30-stash.md) | Stash uncommitted working changes | Developer | `cmd/got` |
+| [UC-U31](user/UC-U31-rebase.md) | Rebase a branch onto another | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 
