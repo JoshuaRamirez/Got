@@ -72,6 +72,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdReset(rest, stdout, stderr)
 	case "restore":
 		return cmdRestore(rest, stdout, stderr)
+	case "blame":
+		return cmdBlame(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -110,7 +112,8 @@ usage:
   got status
   got checkout <branch>   (alias: switch; --force to discard uncommitted changes)
   got commit -m <message> [--branch <name>] [--actor <name>]
-  got log [<branch>]
+  got log [<branch>] [--touching <name>]   (--touching filters to commits that changed a node)
+  got blame <name>             (which commit introduced / last changed a node)
   got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
   got tag <name> [<commit-ish>] | got tags
   got revert <commit-ish>      (new commit undoing the target)
@@ -781,10 +784,17 @@ func cmdCommit(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdLog(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("log", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var touching string
+	fs.StringVar(&touching, "touching", "", "only commits that added/changed/removed this node")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	branch := currentBranch()
-	if len(args) == 1 {
-		branch = args[0]
-	} else if len(args) > 1 {
+	if fs.NArg() == 1 {
+		branch = fs.Arg(0)
+	} else if fs.NArg() > 1 {
 		fmt.Fprintln(stderr, "log: expected an optional <branch>")
 		return 2
 	}
@@ -808,7 +818,11 @@ func cmdLog(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "log: %v\n", err)
 		return 1
 	}
+	target := vid(touching)
 	for _, c := range commits {
+		if touching != "" && !commitTouches(log, c, target) {
+			continue
+		}
 		author := c.Actor
 		if author == "" {
 			author = "-"
@@ -816,6 +830,130 @@ func cmdLog(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", shortID(c.ID[:]), author, c.Message)
 	}
 	return 0
+}
+
+// commitTouches reports whether commit c added, removed, or changed the given
+// vertex relative to its first parent.
+func commitTouches(log *history.Log, c history.Commit, target identity.VertexID) bool {
+	var parentSnap graph.Snapshot
+	if len(c.Parents) > 0 {
+		if p, ok := log.Get(c.Parents[0]); ok {
+			parentSnap = p.Snapshot
+		}
+	}
+	d := graph.Diff(parentSnap, c.Snapshot)
+	th := hexOfVID(target)
+	for _, v := range d.AddedVertices {
+		if v.ID == th {
+			return true
+		}
+	}
+	for _, v := range d.RemovedVertices {
+		if v.ID == th {
+			return true
+		}
+	}
+	for _, ch := range d.ChangedVertices {
+		if ch.New.ID == th {
+			return true
+		}
+	}
+	return false
+}
+
+func hexOfVID(id identity.VertexID) string { return hex.EncodeToString(id[:]) }
+
+// cmdBlame reports which commit introduced a node and which last changed it —
+// per-node provenance, rather than git's per-line heuristic blame.
+func cmdBlame(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "blame: expected <name>")
+		return 2
+	}
+	name := args[0]
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "blame: %v\n", err)
+		return 1
+	}
+	head, ok := state.Namespace().ResolveRef(context.Background(), commitRefName(currentBranch()))
+	if !ok {
+		fmt.Fprintln(stderr, "blame: current branch has no commits")
+		return 1
+	}
+	anc, err := log.Ancestors(commitFromVID(head))
+	if err != nil {
+		fmt.Fprintf(stderr, "blame: %v\n", err)
+		return 1
+	}
+	// Ancestors is newest-first; walk chronologically (oldest-first).
+	target := hexOfVID(vid(name))
+	var introduced, lastChanged *history.Commit
+	var prev *graph.VertexSnapshot
+	for i := len(anc) - 1; i >= 0; i-- {
+		c := anc[i]
+		cur, present := findVertexInSnap(c.Snapshot, target)
+		if !present {
+			continue
+		}
+		cc := c
+		if introduced == nil {
+			introduced = &cc
+			lastChanged = &cc
+			pv := cur
+			prev = &pv
+			continue
+		}
+		if prev == nil || !snapVertexEqual(*prev, cur) {
+			lastChanged = &cc
+			pv := cur
+			prev = &pv
+		}
+	}
+	if introduced == nil {
+		fmt.Fprintf(stderr, "blame: %q not present in this branch's history\n", name)
+		return 1
+	}
+	fmt.Fprintf(stdout, "node %s\n", name)
+	fmt.Fprintf(stdout, "  introduced by  %s  %s\t%s\n", shortID(introduced.ID[:]), blameAuthor(*introduced), introduced.Message)
+	fmt.Fprintf(stdout, "  last changed   %s  %s\t%s\n", shortID(lastChanged.ID[:]), blameAuthor(*lastChanged), lastChanged.Message)
+	return 0
+}
+
+func blameAuthor(c history.Commit) string {
+	if c.Actor == "" {
+		return "-"
+	}
+	return c.Actor
+}
+
+func findVertexInSnap(s graph.Snapshot, hexID string) (graph.VertexSnapshot, bool) {
+	for _, v := range s.Vertices {
+		if v.ID == hexID {
+			return v, true
+		}
+	}
+	return graph.VertexSnapshot{}, false
+}
+
+func snapVertexEqual(a, b graph.VertexSnapshot) bool {
+	if a.Type != b.Type || a.Time != b.Time || a.Trust != b.Trust {
+		return false
+	}
+	if len(a.Attrs) != len(b.Attrs) {
+		return false
+	}
+	for k, av := range a.Attrs {
+		if bv, ok := b.Attrs[k]; !ok || bv != av {
+			return false
+		}
+	}
+	return true
 }
 
 func cmdDiff(args []string, stdout, stderr io.Writer) int {

@@ -72,6 +72,8 @@ When a UC is retired:
 
 | [UC-U27](user/UC-U27-branch-delete-rename.md) | Delete and rename branches | Verified | `cmd/got` (`branch -d`, `branch -m`), `internal/namespace` (`DeleteRef` on Store/memStore/FileStore/HTTPStore + handler) | `cmd/got/run_test.go`, `internal/namespace/*_test.go` | 2026-06-16 | branch -d removes the commit pointer (DeleteRef) + first-class vertex (refused for current branch); branch -m moves the pointer + HEAD, drops the old vertex. DeleteRef added across all Store impls (idempotent, durable in FileStore, routed in HTTP handler). Tests: delete + gone, delete-current-refused, rename + old-gone; namespace mem/file/http DeleteRef. |
 
+| [UC-U28](user/UC-U28-blame-node-history.md) | Blame a node and query its history | Verified | `cmd/got` (`blame`, `log --touching`) | `cmd/got/run_test.go` | 2026-06-16 | blame <name> walks the branch's commit ancestry chronologically to report the introducing and last-changing commits (author+message) for a node; log --touching <name> filters to commits whose graph.Diff vs parent added/removed/changed the node. Per-node provenance — better than git's per-line heuristic. Tests: blame introduced-by, log --touching filters, blame-unknown. |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -110,11 +112,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 27 | 0 | 27 |
+| User | 0 | 0 | 0 | 28 | 0 | 28 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **54** | **0** | **54** |
+| **Total** | **0** | **0** | **0** | **55** | **0** | **55** |
 
-**Verified coverage: 54 / 54 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 55 / 55 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added

@@ -761,3 +761,54 @@ func TestBranchRename(t *testing.T) {
 		t.Fatal("old branch name should be gone")
 	}
 }
+
+// --- blame / log --touching (UC-U28) ---
+
+func TestBlame(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "report", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "create report", "--actor", "alice")
+	runCLI(t, "add-vertex", "appendix", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add appendix", "--actor", "bob")
+
+	code, out, errs := runCLI(t, "blame", "report")
+	if code != 0 {
+		t.Fatalf("blame: %s", errs)
+	}
+	if !strings.Contains(out, "introduced by") || !strings.Contains(out, "alice") || !strings.Contains(out, "create report") {
+		t.Fatalf("blame report should credit alice's commit: %q", out)
+	}
+	_, out, _ = runCLI(t, "blame", "appendix")
+	if !strings.Contains(out, "bob") || !strings.Contains(out, "add appendix") {
+		t.Fatalf("blame appendix should credit bob: %q", out)
+	}
+}
+
+func TestLogTouching(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a", "--actor", "alice")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add b", "--actor", "bob")
+
+	code, out, _ := runCLI(t, "log", "--touching", "b")
+	if code != 0 {
+		t.Fatal("log --touching failed")
+	}
+	if !strings.Contains(out, "add b") {
+		t.Fatalf("expected the commit that added b: %q", out)
+	}
+	if strings.Contains(out, "add a") {
+		t.Fatalf("commit that did not touch b should be filtered out: %q", out)
+	}
+}
+
+func TestBlameUnknown(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	code, _, errs := runCLI(t, "blame", "ghost")
+	if code != 1 || !strings.Contains(errs, "not present") {
+		t.Fatalf("expected not-present error, code=%d err=%q", code, errs)
+	}
+}
