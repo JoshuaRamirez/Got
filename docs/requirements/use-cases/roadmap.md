@@ -147,24 +147,28 @@ UC-U04 and UC-U17 stay `Specified` until Phase 4 lands `repo`.
 **All phases complete. Roadmap finished — the original 37 UCs are
 Verified.**
 
-Since the roadmap was finished, twelve additive capability UCs have
-landed on top of it (tracked in `ledger.md`, which now reads 49/49
-Verified): UC-U18 (three-way merge), UC-U19 (`cmd/got` CLI), UC-U20
-(repository persist/reload), UC-U21 (first-class branches), UC-U22
-(commit history / `commit`+`log`), UC-S21 (frontier audit /
-Strict-on-Release), UC-S22 (durable namespace `FileStore`), UC-S23
-(graph snapshot codec), UC-S24 (graph query language), UC-S25 (remote
-namespace over HTTP), UC-S26 (operation-first commit DAG), and UC-S27
-(structural diff).
+Since the roadmap was finished, the catalogue has grown well beyond the
+original 37 — `ledger.md` now reads **57/57 Verified**. The additive work
+falls in two arcs:
 
-Most extend existing packages (`composition`, `namespace`, `graph`,
-`repo`) and the top-level `cmd/got` application. One new leaf package was
-added: `internal/history` (commit DAG), which imports only `graph` and
-`identity` and is consumed by `repo` — so it slots below `repo` in the
-dependency graph without changing the phase ordering. Together UC-U21,
-UC-U22, UC-S26, UC-S27 push the system toward a typed, governed,
-content-addressed version-control substrate (first-class branches with
-fork ancestry, non-lossy operation-first history, and semantic diff).
+1. **Engine hardening / composability** (UC-S21–S25): frontier audit &
+   Strict-on-Release, durable `FileStore` namespace, graph snapshot
+   codec, graph query language, remote namespace over HTTP.
+2. **A local version-control layer** on top of the graph substrate
+   (UC-U18–U30 + UC-S26/S27, surfaced through `cmd/got`): three-way merge,
+   repository persist/reload, first-class branches with fork ancestry,
+   operation-first commit history, structural diff, current-branch/HEAD +
+   checkout/status, semantic branch merge + merge-base, show/tag/revert,
+   reset/restore, branch delete/rename, blame + per-node history,
+   cherry-pick/amend, and stash. `got` now covers the git-local
+   daily-driver surface and does several things git cannot (fork
+   ancestry, semantic merge/diff, per-node blame, provenance queries).
+
+One new leaf package was added — `internal/history` (commit DAG), which
+imports only `graph` and `identity` and is consumed by `repo`, slotting
+below `repo` without changing the phase ordering. Everything else extends
+existing packages and the top-level `cmd/got` application, so the
+dependency-ordered phases above are unchanged.
 
 Next work is hardening, new UCs, or composability — see the ledger's
 "Next-bite candidates" section for the options.
