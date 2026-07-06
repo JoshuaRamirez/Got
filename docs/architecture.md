@@ -74,6 +74,11 @@ The dependency graph is a strict DAG.
 - **`provenance`** — closure operator over causal edges. `Cone`,
   `Close`, `Causes`, `TraceSet`. Treats causal edges as undirected
   because the admissibility table mixes directions.
+- **`history`** — operation-first commit DAG. Each `Commit` records the
+  operation delta (consumed/produced) plus the resulting `graph.Snapshot`,
+  content-addressed by parents + message + actor + state; `Log` walks
+  ancestry. Imports only `graph` and `identity`; consumed by `repo`
+  (UC-S26). The non-lossy alternative to git's snapshot-only commits.
 
 ### Layer 1 — single-purpose engines
 
