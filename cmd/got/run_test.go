@@ -282,3 +282,76 @@ func TestMaterializeCommand(t *testing.T) {
 		t.Fatalf("expected a 2-path manifest bundle, got %q", out)
 	}
 }
+
+// --- first-class branches (UC-U21) ---
+
+func TestBranchCreateAndList(t *testing.T) {
+	initRepo(t)
+	if code, _, errs := runCLI(t, "branch", "main"); code != 0 {
+		t.Fatalf("branch main: %s", errs)
+	}
+	if code, out, errs := runCLI(t, "branch", "feature", "--from", "main", "--desc", "new work"); code != 0 {
+		t.Fatalf("branch feature: %s (%s)", errs, out)
+	}
+	code, out, _ := runCLI(t, "branches")
+	if code != 0 {
+		t.Fatal("branches failed")
+	}
+	if !strings.Contains(out, "main") || !strings.Contains(out, "feature") {
+		t.Fatalf("expected both branches, got %q", out)
+	}
+	if !strings.Contains(out, "(from main)") || !strings.Contains(out, "new work") {
+		t.Fatalf("expected parent + desc metadata, got %q", out)
+	}
+}
+
+// branch-log shows fork ancestry — the thing git can't represent.
+func TestBranchLog(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "branch", "main")
+	runCLI(t, "branch", "release-2", "--from", "main")
+	runCLI(t, "branch", "feature", "--from", "release-2")
+
+	code, out, errs := runCLI(t, "branch-log", "feature")
+	if code != 0 {
+		t.Fatalf("branch-log: %s", errs)
+	}
+	if !strings.Contains(out, "feature <- release-2 <- main") {
+		t.Fatalf("expected fork ancestry, got %q", out)
+	}
+}
+
+func TestBranchUnknownParent(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "branch", "x", "--from", "ghost")
+	if code != 1 || !strings.Contains(errs, "unknown branch") {
+		t.Fatalf("expected unknown-parent rejection, code=%d err=%q", code, errs)
+	}
+}
+
+func TestBranchDuplicate(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "branch", "main")
+	code, _, errs := runCLI(t, "branch", "main")
+	if code != 1 || !strings.Contains(errs, "already exists") {
+		t.Fatalf("expected duplicate rejection, code=%d err=%q", code, errs)
+	}
+}
+
+// A branch tip binds to a vertex and resolves like any ref.
+func TestBranchWithTip(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "art", "--type", "Artifact")
+	if code, _, errs := runCLI(t, "branch", "main", "--tip", "art"); code != 0 {
+		t.Fatalf("branch with tip: %s", errs)
+	}
+	code, out, _ := runCLI(t, "resolve", "main")
+	if code != 0 || !strings.Contains(out, "main -> art") {
+		t.Fatalf("expected tip to resolve to art, got %q", out)
+	}
+	// The branch persists across invocations as a first-class vertex.
+	_, out, _ = runCLI(t, "branches")
+	if !strings.Contains(out, "main") {
+		t.Fatalf("branch should persist, got %q", out)
+	}
+}

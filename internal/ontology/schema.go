@@ -59,6 +59,10 @@ var admissibleEdges = map[edgeTriple]bool{
 	// Agents (non-causal metadata)
 	{Agent, AuthoredBy, Artifact}: true,
 	{Human, ApprovedBy, Artifact}: true,
+
+	// Branch lineage (first-class branches): a branch forks from its parent
+	// branch.
+	{BranchSelector, ForksFrom, BranchSelector}: true,
 }
 
 // DefaultSchema implements Schema with the minimal conservative admissibility table.
