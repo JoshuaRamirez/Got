@@ -51,6 +51,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCommit(rest, stdout, stderr)
 	case "log":
 		return cmdLog(rest, stdout, stderr)
+	case "diff":
+		return cmdDiff(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -87,6 +89,8 @@ usage:
   got branch-log <name>
   got commit -m <message> [--branch <name>] [--actor <name>]
   got log [<branch>]
+  got diff <branch>            (last commit vs its parent)
+  got diff <branchA> <branchB> (two branch heads)
   got list vertices|edges
   got merge <listA> <listB>              (comma-separated vertex names)
   got merge3 <ancestor> <left> <right>   (three-way, comma-separated lists)
@@ -496,6 +500,120 @@ func cmdLog(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", shortID(c.ID[:]), author, c.Message)
 	}
 	return 0
+}
+
+func cmdDiff(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(stderr, "diff: expected <branch> or <branchA> <branchB>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "diff: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+
+	head := func(branch string) (history.Commit, bool) {
+		id, ok := state.Namespace().ResolveRef(ctx, commitRefName(branch))
+		if !ok {
+			return history.Commit{}, false
+		}
+		return log.Get(commitFromVID(id))
+	}
+
+	var oldSnap, newSnap graph.Snapshot
+	if len(args) == 1 {
+		h, ok := head(args[0])
+		if !ok {
+			fmt.Fprintf(stderr, "diff: no commits on branch %q\n", args[0])
+			return 1
+		}
+		newSnap = h.Snapshot
+		if len(h.Parents) > 0 {
+			if p, ok := log.Get(h.Parents[0]); ok {
+				oldSnap = p.Snapshot
+			}
+		}
+	} else {
+		a, ok := head(args[0])
+		b, ok2 := head(args[1])
+		if !ok || !ok2 {
+			fmt.Fprintln(stderr, "diff: both branches must have commits")
+			return 1
+		}
+		oldSnap, newSnap = a.Snapshot, b.Snapshot
+	}
+
+	printDelta(stdout, graph.Diff(oldSnap, newSnap))
+	return 0
+}
+
+// snapName recovers the human name recorded on a snapshot element's attrs.
+func snapName(attrs graph.AttrMap, fallbackHex string) string {
+	if attrs != nil {
+		if n, ok := attrs[nameAttr].(string); ok {
+			return n
+		}
+	}
+	if len(fallbackHex) > 12 {
+		return fallbackHex[:12]
+	}
+	return fallbackHex
+}
+
+func printDelta(w io.Writer, d graph.Delta) {
+	if d.Empty() {
+		fmt.Fprintln(w, "no changes")
+		return
+	}
+	for _, v := range d.AddedVertices {
+		fmt.Fprintf(w, "+ vertex %s (%s)\n", snapName(v.Attrs, v.ID), v.Type)
+	}
+	for _, v := range d.RemovedVertices {
+		fmt.Fprintf(w, "- vertex %s (%s)\n", snapName(v.Attrs, v.ID), v.Type)
+	}
+	for _, c := range d.ChangedVertices {
+		fmt.Fprintf(w, "~ vertex %s: %s\n", snapName(c.New.Attrs, c.New.ID), describeVertexChange(c))
+	}
+	for _, e := range d.AddedEdges {
+		fmt.Fprintf(w, "+ edge %s (%s)\n", snapName(e.Attrs, e.ID), e.Type)
+	}
+	for _, e := range d.RemovedEdges {
+		fmt.Fprintf(w, "- edge %s (%s)\n", snapName(e.Attrs, e.ID), e.Type)
+	}
+	for _, c := range d.ChangedEdges {
+		fmt.Fprintf(w, "~ edge %s (%s -> %s)\n", snapName(c.New.Attrs, c.New.ID), c.Old.Type, c.New.Type)
+	}
+}
+
+func describeVertexChange(c graph.VertexChange) string {
+	if c.Old.Type != c.New.Type {
+		return fmt.Sprintf("type %s -> %s", c.Old.Type, c.New.Type)
+	}
+	// Report the first attr that differs (ignoring the reserved name attr).
+	for k, nv := range c.New.Attrs {
+		if k == nameAttr {
+			continue
+		}
+		if ov, ok := c.Old.Attrs[k]; !ok || ov != nv {
+			return fmt.Sprintf("attr %q: %v -> %v", k, c.Old.Attrs[k], nv)
+		}
+	}
+	for k := range c.Old.Attrs {
+		if k == nameAttr {
+			continue
+		}
+		if _, ok := c.New.Attrs[k]; !ok {
+			return fmt.Sprintf("attr %q removed", k)
+		}
+	}
+	return "content changed"
 }
 
 func cmdList(args []string, stdout, stderr io.Writer) int {

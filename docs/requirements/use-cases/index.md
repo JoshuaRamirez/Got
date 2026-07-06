@@ -60,6 +60,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-S24](system/UC-S24-evaluate-graph-query.md) | Evaluate a graph query | `graph.Graph` | `internal/graph` |
 | [UC-S25](system/UC-S25-remote-namespace.md) | Bind and resolve names over a network | `namespace.Store` | `internal/namespace` |
 | [UC-S26](system/UC-S26-commit-history.md) | Record operation-first commit history | `history.Log` | `internal/history` |
+| [UC-S27](system/UC-S27-structural-diff.md) | Compute a structural diff between two graph states | `graph.Diff` | `internal/graph` |
 
 ## Coverage
 

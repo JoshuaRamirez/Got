@@ -412,3 +412,41 @@ func TestCommitPersistence(t *testing.T) {
 		t.Fatalf("commit should persist across invocations, got %q", out)
 	}
 }
+
+// --- diff (UC-S27 via CLI) ---
+
+func TestDiffLastCommit(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "v1")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "add-edge", "e", "--type", "derived_from", "--from", "b", "--to", "a")
+	runCLI(t, "commit", "-m", "v2")
+
+	code, out, errs := runCLI(t, "diff", "main")
+	if code != 0 {
+		t.Fatalf("diff: %s", errs)
+	}
+	if !strings.Contains(out, "+ vertex b") || !strings.Contains(out, "+ edge e") {
+		t.Fatalf("expected the v2 additions, got %q", out)
+	}
+	if strings.Contains(out, "vertex a") {
+		t.Fatalf("a was in the parent; it should not appear as a change: %q", out)
+	}
+}
+
+func TestDiffNoCommits(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "diff", "main")
+	if code != 1 || !strings.Contains(errs, "no commits") {
+		t.Fatalf("expected no-commits error, code=%d err=%q", code, errs)
+	}
+}
+
+func TestDiffBadArgs(t *testing.T) {
+	initRepo(t)
+	code, _, _ := runCLI(t, "diff", "a", "b", "c")
+	if code != 2 {
+		t.Fatalf("expected usage error for 3 args, got %d", code)
+	}
+}
