@@ -812,3 +812,51 @@ func TestBlameUnknown(t *testing.T) {
 		t.Fatalf("expected not-present error, code=%d err=%q", code, errs)
 	}
 }
+
+// --- cherry-pick / amend (UC-U29) ---
+
+func TestCherryPick(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	runCLI(t, "checkout", "-b", "feature")
+	runCLI(t, "add-vertex", "feat", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add feat")
+	featCommit := func() string {
+		_, out, _ := runCLI(t, "log")
+		return strings.Split(strings.Split(strings.TrimSpace(out), "\n")[0], "\t")[0]
+	}()
+	runCLI(t, "checkout", "main")
+
+	if code, out, errs := runCLI(t, "cherry-pick", featCommit); code != 0 || !strings.Contains(out, "cherry-picked") {
+		t.Fatalf("cherry-pick: %s %s", errs, out)
+	}
+	_, out, _ := runCLI(t, "list", "vertices")
+	if !strings.Contains(out, "feat") {
+		t.Fatalf("cherry-pick should bring feat onto main: %q", out)
+	}
+	_, out, _ = runCLI(t, "log")
+	if !strings.Contains(out, "cherry-pick") {
+		t.Fatalf("expected a cherry-pick commit: %q", out)
+	}
+}
+
+func TestAmend(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "typo msg")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact") // uncommitted, to be folded in
+
+	if code, out, errs := runCLI(t, "amend", "-m", "fixed msg"); code != 0 || !strings.Contains(out, "amended") {
+		t.Fatalf("amend: %s %s", errs, out)
+	}
+	_, out, _ := runCLI(t, "log")
+	if !strings.Contains(out, "fixed msg") || strings.Contains(out, "typo msg") {
+		t.Fatalf("amend should replace the message: %q", out)
+	}
+	// The working change was folded into the amended commit → clean status.
+	_, out, _ = runCLI(t, "status")
+	if !strings.Contains(out, "clean") {
+		t.Fatalf("amend should fold in the working change: %q", out)
+	}
+}

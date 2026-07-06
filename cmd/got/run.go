@@ -74,6 +74,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRestore(rest, stdout, stderr)
 	case "blame":
 		return cmdBlame(rest, stdout, stderr)
+	case "cherry-pick":
+		return cmdCherryPick(rest, stdout, stderr)
+	case "amend":
+		return cmdAmend(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -114,6 +118,8 @@ usage:
   got commit -m <message> [--branch <name>] [--actor <name>]
   got log [<branch>] [--touching <name>]   (--touching filters to commits that changed a node)
   got blame <name>             (which commit introduced / last changed a node)
+  got cherry-pick <commit-ish> (apply a commit's change onto the current branch)
+  got amend [-m <message>]     (replace the last commit with the working state)
   got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
   got tag <name> [<commit-ish>] | got tags
   got revert <commit-ish>      (new commit undoing the target)
@@ -1493,6 +1499,130 @@ func cmdRestore(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "restored working graph to %s\n", shortID(cid[:]))
+	return 0
+}
+
+func cmdCherryPick(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cherry-pick", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var actor string
+	fs.StringVar(&actor, "actor", "", "author")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "cherry-pick: expected <commit-ish>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+	cid, ok := resolveCommit(state, log, fs.Arg(0))
+	if !ok {
+		fmt.Fprintf(stderr, "cherry-pick: unknown commit-ish %q\n", fs.Arg(0))
+		return 1
+	}
+	c, _ := log.Get(cid)
+
+	var parentSnap graph.Snapshot
+	if len(c.Parents) > 0 {
+		if p, ok := log.Get(c.Parents[0]); ok {
+			parentSnap = p.Snapshot
+		}
+	}
+	// Forward delta (parent -> c) applied to the current working state.
+	forward := graph.Diff(parentSnap, c.Snapshot)
+	appliedSnap := applySnapDelta(graph.EncodeSnapshot(state.Graph()), forward)
+	applied, err := appliedSnap.Build(schema())
+	if err != nil {
+		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
+		return 1
+	}
+
+	branch := currentBranch()
+	var parents []history.CommitID
+	if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(branch)); ok {
+		parents = []history.CommitID{commitFromVID(id)}
+	}
+	newState := repo.NewState(applied, state.Namespace())
+	if actor == "" {
+		actor = c.Actor
+	}
+	newC, err := newService().Commit(ctx, newState, log, "cherry-pick "+shortID(cid[:])+": "+c.Message, actor, parents)
+	if err != nil {
+		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
+		return 1
+	}
+	if err := saveHistory(log); err != nil {
+		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
+		return 1
+	}
+	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(newC.ID)); err != nil {
+		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
+		return 1
+	}
+	if err := saveState(newState); err != nil {
+		fmt.Fprintf(stderr, "cherry-pick: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "cherry-picked %s as %s\n", shortID(cid[:]), shortID(newC.ID[:]))
+	return 0
+}
+
+func cmdAmend(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("amend", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var message string
+	fs.StringVar(&message, "m", "", "new commit message (default: keep existing)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "amend: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+	branch := currentBranch()
+	headID, ok := state.Namespace().ResolveRef(ctx, commitRefName(branch))
+	if !ok {
+		fmt.Fprintln(stderr, "amend: no commit to amend")
+		return 1
+	}
+	head, _ := log.Get(commitFromVID(headID))
+	msg := head.Message
+	if message != "" {
+		msg = message
+	}
+	// The amended commit keeps the original's parents but takes the current
+	// working state as its snapshot. The old commit becomes unreferenced.
+	newC, err := newService().Commit(ctx, state, log, msg, head.Actor, head.Parents)
+	if err != nil {
+		fmt.Fprintf(stderr, "amend: %v\n", err)
+		return 1
+	}
+	if err := saveHistory(log); err != nil {
+		fmt.Fprintf(stderr, "amend: %v\n", err)
+		return 1
+	}
+	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(newC.ID)); err != nil {
+		fmt.Fprintf(stderr, "amend: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "amended: %s\n", shortID(newC.ID[:]))
 	return 0
 }
 
