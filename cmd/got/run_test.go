@@ -450,3 +450,83 @@ func TestDiffBadArgs(t *testing.T) {
 		t.Fatalf("expected usage error for 3 args, got %d", code)
 	}
 }
+
+// --- HEAD / checkout / status (UC-U23) ---
+
+func TestStatusFlow(t *testing.T) {
+	initRepo(t)
+	code, out, _ := runCLI(t, "status")
+	if code != 0 || !strings.Contains(out, "On branch main") || !strings.Contains(out, "clean") {
+		t.Fatalf("fresh status: %q", out)
+	}
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	_, out, _ = runCLI(t, "status")
+	if !strings.Contains(out, "Uncommitted changes") || !strings.Contains(out, "+ vertex a") {
+		t.Fatalf("dirty status: %q", out)
+	}
+	runCLI(t, "commit", "-m", "add a")
+	_, out, _ = runCLI(t, "status")
+	if !strings.Contains(out, "clean") {
+		t.Fatalf("post-commit status should be clean: %q", out)
+	}
+}
+
+func TestCheckoutCreateSwitchAndWorkingTree(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+
+	if code, out, errs := runCLI(t, "checkout", "-b", "dev"); code != 0 || !strings.Contains(out, "dev") {
+		t.Fatalf("checkout -b dev: %s %s", errs, out)
+	}
+	// commit defaults to HEAD (dev now).
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add b")
+	_, out, _ := runCLI(t, "log")
+	if !strings.Contains(out, "add b") {
+		t.Fatalf("log should default to dev: %q", out)
+	}
+
+	// Switch back to main: working tree follows HEAD (no b).
+	runCLI(t, "checkout", "main")
+	_, out, _ = runCLI(t, "list", "vertices")
+	if !strings.Contains(out, "a") || strings.Contains(out, "b\t") {
+		t.Fatalf("main working tree should have a, not b: %q", out)
+	}
+}
+
+func TestCheckoutNonexistent(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "checkout", "ghost")
+	if code != 1 || !strings.Contains(errs, "no such branch") {
+		t.Fatalf("expected no-such-branch, code=%d err=%q", code, errs)
+	}
+}
+
+func TestCheckoutDirtyRefused(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	runCLI(t, "checkout", "-b", "dev")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact") // uncommitted
+	code, _, errs := runCLI(t, "checkout", "main")
+	if code != 1 || !strings.Contains(errs, "uncommitted") {
+		t.Fatalf("expected dirty-refusal, code=%d err=%q", code, errs)
+	}
+	// --force discards and switches.
+	if code, _, errs := runCLI(t, "checkout", "--force", "main"); code != 0 {
+		t.Fatalf("checkout --force should succeed: %s", errs)
+	}
+}
+
+// A first-class branch vertex does not count as an uncommitted content change.
+func TestFirstClassBranchNotDirty(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	runCLI(t, "branch", "feature")
+	_, out, _ := runCLI(t, "status")
+	if !strings.Contains(out, "clean") {
+		t.Fatalf("creating a first-class branch should not dirty status: %q", out)
+	}
+}
