@@ -55,6 +55,7 @@ go build -o got ./cmd/got
 ./got tag v1 ; ./got show v1 ; ./got revert v1   # name / inspect / undo a commit
 ./got blame report        # which commit introduced / last changed a node (per-node, not per-line)
 ./got rebase main         # replay the current branch's commits onto another (linear)
+./got reflog              # journal of HEAD/branch tip moves, newest first (recover dropped commits)
 ./got log                 # branch history, newest first (non-lossy)
 ./got diff                # structural diff of HEAD's last commit vs its parent
 ./got trace exec art      # causal paths via the provenance engine

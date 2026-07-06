@@ -1018,3 +1018,86 @@ func TestMergeOursTheirsExclusive(t *testing.T) {
 		t.Fatalf("--ours + --theirs should be rejected, got %d", code)
 	}
 }
+
+// --- reflog (UC-U33) ---
+
+func TestReflogRecordsHeadActivity(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "first")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "second")
+
+	code, out, errs := runCLI(t, "reflog")
+	if code != 0 {
+		t.Fatalf("reflog failed: %s", errs)
+	}
+	// HEAD reflog defaults show commit activity, newest first with @{0} newest.
+	if !strings.Contains(out, "HEAD@{0}: commit: second") {
+		t.Fatalf("expected newest HEAD entry for 'second', got %q", out)
+	}
+	if !strings.Contains(out, "commit: first") {
+		t.Fatalf("expected 'first' in reflog, got %q", out)
+	}
+	if strings.Index(out, "second") > strings.Index(out, "first") {
+		t.Fatalf("expected newest-first order, got %q", out)
+	}
+}
+
+func TestReflogPerRefAndCheckout(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "on main")
+	runCLI(t, "checkout", "-b", "feature")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "on feature")
+	runCLI(t, "checkout", "main")
+
+	// The current-branch (HEAD) reflog captures the checkout move.
+	_, head, _ := runCLI(t, "reflog")
+	if !strings.Contains(head, "checkout: moving from feature to main") {
+		t.Fatalf("expected checkout move in HEAD reflog, got %q", head)
+	}
+
+	// A named ref shows only that branch's tip movements.
+	_, feat, _ := runCLI(t, "reflog", "feature")
+	if !strings.Contains(feat, "feature@{0}: commit: on feature") {
+		t.Fatalf("expected feature commit, got %q", feat)
+	}
+	if strings.Contains(feat, "on main") {
+		t.Fatalf("feature reflog should not include main's commit, got %q", feat)
+	}
+}
+
+func TestReflogRecoverAfterReset(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "keep")
+	runCLI(t, "tag", "base") // name the commit we will roll back to
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "to-drop")
+
+	// Roll the branch tip back to the first commit; the second commit is now
+	// unreferenced by any branch.
+	if code, _, errs := runCLI(t, "reset", "--hard", "base"); code != 0 {
+		t.Fatalf("reset failed: %s", errs)
+	}
+
+	// The reflog is the recovery path: it still records the reset action and,
+	// crucially, the dropped commit — so it remains reachable.
+	_, rl, _ := runCLI(t, "reflog")
+	if !strings.Contains(rl, "reset: moving to") {
+		t.Fatalf("expected reset action in reflog, got %q", rl)
+	}
+	if !strings.Contains(rl, "to-drop") {
+		t.Fatalf("expected dropped commit to remain in reflog, got %q", rl)
+	}
+}
+
+func TestReflogBeforeInit(t *testing.T) {
+	t.Setenv("GOT_DIR", t.TempDir())
+	code, _, errs := runCLI(t, "reflog")
+	if code == 0 || !strings.Contains(errs, "run 'got init'") {
+		t.Fatalf("expected init hint, code=%d err=%q", code, errs)
+	}
+}
