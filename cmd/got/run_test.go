@@ -646,3 +646,72 @@ func TestShowUnknown(t *testing.T) {
 		t.Fatalf("expected unknown-commit-ish, code=%d err=%q", code, errs)
 	}
 }
+
+// --- reset / restore (UC-U26) ---
+
+func oldestCommitShort(t *testing.T) string {
+	t.Helper()
+	_, out, _ := runCLI(t, "log")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) == 0 {
+		t.Fatal("no commits")
+	}
+	return strings.Split(lines[len(lines)-1], "\t")[0]
+}
+
+func TestResetHard(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	first := oldestCommitShort(t)
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add b")
+
+	if code, out, errs := runCLI(t, "reset", "--hard", first); code != 0 || !strings.Contains(out, "hard") {
+		t.Fatalf("reset --hard: %s %s", errs, out)
+	}
+	_, out, _ := runCLI(t, "list", "vertices")
+	if strings.Contains(out, "b\t") || !strings.Contains(out, "a\t") {
+		t.Fatalf("reset --hard should drop b, keep a: %q", out)
+	}
+	_, out, _ = runCLI(t, "status")
+	if !strings.Contains(out, "clean") {
+		t.Fatalf("reset --hard should leave a clean tree: %q", out)
+	}
+}
+
+func TestResetSoftKeepsWorking(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	first := oldestCommitShort(t)
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add b")
+
+	if code, out, _ := runCLI(t, "reset", first); code != 0 || !strings.Contains(out, "kept") {
+		t.Fatalf("soft reset: %q", out)
+	}
+	// Working tree still has b, so status is dirty relative to the new tip.
+	_, out, _ := runCLI(t, "status")
+	if !strings.Contains(out, "+ vertex b") {
+		t.Fatalf("soft reset should keep b as uncommitted: %q", out)
+	}
+}
+
+func TestRestore(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	runCLI(t, "add-vertex", "junk", "--type", "Artifact") // uncommitted
+	if code, out, errs := runCLI(t, "restore"); code != 0 || !strings.Contains(out, "restored") {
+		t.Fatalf("restore: %s %s", errs, out)
+	}
+	_, out, _ := runCLI(t, "status")
+	if !strings.Contains(out, "clean") {
+		t.Fatalf("restore should clean the tree: %q", out)
+	}
+	_, out, _ = runCLI(t, "list", "vertices")
+	if strings.Contains(out, "junk") {
+		t.Fatalf("restore should drop junk: %q", out)
+	}
+}

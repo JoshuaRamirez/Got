@@ -68,6 +68,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdTag(nil, stdout, stderr)
 	case "revert":
 		return cmdRevert(rest, stdout, stderr)
+	case "reset":
+		return cmdReset(rest, stdout, stderr)
+	case "restore":
+		return cmdRestore(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -109,6 +113,8 @@ usage:
   got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
   got tag <name> [<commit-ish>] | got tags
   got revert <commit-ish>      (new commit undoing the target)
+  got reset [--hard] <commit-ish>   (move current branch tip; --hard resets working graph)
+  got restore [<commit-ish>]        (reset working graph to a commit; default HEAD)
   got diff [<branch>]          (last commit vs its parent; default HEAD)
   got diff <branchA> <branchB> (two branch heads)
   got list vertices|edges
@@ -1122,6 +1128,102 @@ func cmdRevert(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "reverted %s: new commit %s\n", shortID(cid[:]), shortID(newC.ID[:]))
+	return 0
+}
+
+func cmdReset(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var hard bool
+	fs.BoolVar(&hard, "hard", false, "also reset the working graph to the target commit")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "reset: expected [--hard] <commit-ish>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "reset: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+	cid, ok := resolveCommit(state, log, fs.Arg(0))
+	if !ok {
+		fmt.Fprintf(stderr, "reset: unknown commit-ish %q\n", fs.Arg(0))
+		return 1
+	}
+	branch := currentBranch()
+	if err := state.Namespace().BindRef(ctx, commitRefName(branch), vidFromCommit(cid)); err != nil {
+		fmt.Fprintf(stderr, "reset: %v\n", err)
+		return 1
+	}
+	if hard {
+		c, _ := log.Get(cid)
+		g, err := c.Snapshot.Build(schema())
+		if err != nil {
+			fmt.Fprintf(stderr, "reset: %v\n", err)
+			return 1
+		}
+		if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+			fmt.Fprintf(stderr, "reset: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "reset %s to %s (hard)\n", branch, shortID(cid[:]))
+		return 0
+	}
+	fmt.Fprintf(stdout, "reset %s to %s (working graph kept)\n", branch, shortID(cid[:]))
+	return 0
+}
+
+func cmdRestore(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 1 {
+		fmt.Fprintln(stderr, "restore: expected an optional <commit-ish>")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "restore: %v\n", err)
+		return 1
+	}
+	var cid history.CommitID
+	if len(args) == 1 {
+		var ok bool
+		cid, ok = resolveCommit(state, log, args[0])
+		if !ok {
+			fmt.Fprintf(stderr, "restore: unknown commit-ish %q\n", args[0])
+			return 1
+		}
+	} else {
+		id, ok := state.Namespace().ResolveRef(context.Background(), commitRefName(currentBranch()))
+		if !ok {
+			fmt.Fprintln(stderr, "restore: current branch has no commits")
+			return 1
+		}
+		cid = commitFromVID(id)
+	}
+	c, _ := log.Get(cid)
+	g, err := c.Snapshot.Build(schema())
+	if err != nil {
+		fmt.Fprintf(stderr, "restore: %v\n", err)
+		return 1
+	}
+	if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+		fmt.Fprintf(stderr, "restore: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "restored working graph to %s\n", shortID(cid[:]))
 	return 0
 }
 

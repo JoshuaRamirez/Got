@@ -68,6 +68,8 @@ When a UC is retired:
 
 | [UC-U25](user/UC-U25-show-tag-revert.md) | Inspect, tag, and revert commits | Verified | `cmd/got` (`show`, `tag`/`tags`, `revert`; commit-ish resolution + tags.json in store.go) | `cmd/got/run_test.go` | 2026-06-16 | show <commit-ish> prints commit metadata + structural diff vs parent; commit-ish resolves a branch tip, tag, or commit-id prefix. tag/tags name commits (tags.json). revert applies the structural reverse-delta of a commit onto the working graph and records a Revert commit. Tests: tag+show, duplicate-tag, revert (removes added vertex, Revert commit in log), unknown-commit-ish. |
 
+| [UC-U26](user/UC-U26-reset-restore.md) | Reset a branch and restore the working graph | Verified | `cmd/got` (`reset`, `restore`) | `cmd/got/run_test.go` | 2026-06-16 | reset [--hard] <commit-ish> repoints the current branch tip (--hard also rewrites the working graph); restore [<commit-ish>] rewrites the working graph to a commit (default HEAD), discarding uncommitted changes. Tests: reset --hard (drops later commit + clean tree), soft reset (keeps working, status dirty), restore (discards uncommitted). |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -106,11 +108,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 25 | 0 | 25 |
+| User | 0 | 0 | 0 | 26 | 0 | 26 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **52** | **0** | **52** |
+| **Total** | **0** | **0** | **0** | **53** | **0** | **53** |
 
-**Verified coverage: 52 / 52 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 53 / 53 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added
