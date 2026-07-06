@@ -40,6 +40,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U31](user/UC-U31-rebase.md) | Rebase a branch onto another | Developer | `cmd/got` |
 | [UC-U32](user/UC-U32-merge-strategy.md) | Resolve a merge with a strategy | Developer | `repo`, `cmd/got` |
 | [UC-U33](user/UC-U33-reflog.md) | Review and recover ref movements with the reflog | Developer | `cmd/got` |
+| [UC-U34](user/UC-U34-bisect.md) | Bisect history to find the first bad commit | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 

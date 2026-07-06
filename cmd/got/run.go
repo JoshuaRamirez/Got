@@ -84,6 +84,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRebase(rest, stdout, stderr)
 	case "reflog":
 		return cmdReflog(rest, stdout, stderr)
+	case "bisect":
+		return cmdBisect(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -129,6 +131,7 @@ usage:
   got stash [push|pop|list]    (save/restore uncommitted working changes)
   got rebase <onto>            (replay the current branch's commits onto another)
   got reflog [<ref>|--all]     (journal of HEAD/branch tip movements, newest first)
+  got bisect start <bad> <good> | good | bad | run <cmd> | reset | status
   got show [<commit-ish>]      (commit metadata + diff vs parent; default HEAD)
   got tag <name> [<commit-ish>] | got tags
   got revert <commit-ish>      (new commit undoing the target)

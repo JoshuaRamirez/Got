@@ -1101,3 +1101,98 @@ func TestReflogBeforeInit(t *testing.T) {
 		t.Fatalf("expected init hint, code=%d err=%q", code, errs)
 	}
 }
+
+// --- bisect (UC-U34) ---
+
+// bisectHistory builds a linear history c0..c5 where a "bug" vertex is first
+// introduced at c3, tags the endpoints good0/bad5, and returns nothing (state
+// lives in the test's GOT_DIR). The first bad commit is c3.
+func bisectHistory(t *testing.T) {
+	t.Helper()
+	initRepo(t)
+	steps := []struct{ v, m string }{
+		{"v0", "c0"}, {"v1", "c1"}, {"v2", "c2"},
+		{"bug", "c3"}, {"v4", "c4"}, {"v5", "c5"},
+	}
+	for i, s := range steps {
+		runCLI(t, "add-vertex", s.v, "--type", "Artifact")
+		if code, _, errs := runCLI(t, "commit", "-m", s.m); code != 0 {
+			t.Fatalf("commit %s: %s", s.m, errs)
+		}
+		if i == 0 {
+			runCLI(t, "tag", "good0")
+		}
+		if i == len(steps)-1 {
+			runCLI(t, "tag", "bad5")
+		}
+	}
+}
+
+// bugPresent reports whether the working graph currently contains the "bug"
+// vertex — the predicate a manual bisect answers by inspection.
+func bugPresent(t *testing.T) bool {
+	t.Helper()
+	_, out, _ := runCLI(t, "list", "vertices")
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		for _, f := range fields {
+			if f == "bug" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestBisectManualConverges(t *testing.T) {
+	bisectHistory(t)
+	if code, out, errs := runCLI(t, "bisect", "start", "bad5", "good0"); code != 0 {
+		t.Fatalf("bisect start: %s %s", errs, out)
+	}
+	var final string
+	for i := 0; i < 10; i++ {
+		_, st, _ := runCLI(t, "bisect", "status")
+		if !strings.Contains(st, "testing:") {
+			break
+		}
+		var out string
+		if bugPresent(t) {
+			_, out, _ = runCLI(t, "bisect", "bad")
+		} else {
+			_, out, _ = runCLI(t, "bisect", "good")
+		}
+		final = out
+	}
+	if !strings.Contains(final, "first bad commit") || !strings.Contains(final, "c3") {
+		t.Fatalf("expected c3 as first bad commit, got %q", final)
+	}
+	if code, out, _ := runCLI(t, "bisect", "reset"); code != 0 || !strings.Contains(out, "back on main") {
+		t.Fatalf("reset should restore main, got %q", out)
+	}
+}
+
+func TestBisectStartValidation(t *testing.T) {
+	bisectHistory(t)
+	// good is not an ancestor of bad when the two are swapped.
+	if code, _, errs := runCLI(t, "bisect", "start", "good0", "bad5"); code == 0 || !strings.Contains(errs, "not an ancestor") {
+		t.Fatalf("expected ancestry rejection, code=%d err=%q", code, errs)
+	}
+	// unknown commit-ish.
+	if code, _, errs := runCLI(t, "bisect", "start", "nope", "good0"); code == 0 || !strings.Contains(errs, "unknown bad") {
+		t.Fatalf("expected unknown-bad error, code=%d err=%q", code, errs)
+	}
+}
+
+func TestBisectVerdictWithoutSession(t *testing.T) {
+	bisectHistory(t)
+	if code, _, errs := runCLI(t, "bisect", "good"); code == 0 || !strings.Contains(errs, "no bisect in progress") {
+		t.Fatalf("expected no-session error, code=%d err=%q", code, errs)
+	}
+}
+
+func TestBisectStatusIdle(t *testing.T) {
+	bisectHistory(t)
+	if code, out, _ := runCLI(t, "bisect", "status"); code != 0 || !strings.Contains(out, "no bisect in progress") {
+		t.Fatalf("expected idle status, code=%d out=%q", code, out)
+	}
+}
