@@ -860,3 +860,54 @@ func TestAmend(t *testing.T) {
 		t.Fatalf("amend should fold in the working change: %q", out)
 	}
 }
+
+// --- stash (UC-U30) ---
+
+func TestStash(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	runCLI(t, "add-vertex", "wip", "--type", "Artifact") // uncommitted
+
+	if code, out, errs := runCLI(t, "stash"); code != 0 || !strings.Contains(out, "stashed") {
+		t.Fatalf("stash: %s %s", errs, out)
+	}
+	_, out, _ := runCLI(t, "status")
+	if !strings.Contains(out, "clean") {
+		t.Fatalf("stash should leave a clean tree: %q", out)
+	}
+	_, out, _ = runCLI(t, "list", "vertices")
+	if strings.Contains(out, "wip") {
+		t.Fatalf("stashed change should be gone: %q", out)
+	}
+	_, out, _ = runCLI(t, "stash", "list")
+	if !strings.Contains(out, "stash@{0}") {
+		t.Fatalf("stash list: %q", out)
+	}
+	// pop restores.
+	if code, out, _ := runCLI(t, "stash", "pop"); code != 0 || !strings.Contains(out, "restored") {
+		t.Fatalf("stash pop: %q", out)
+	}
+	_, out, _ = runCLI(t, "list", "vertices")
+	if !strings.Contains(out, "wip") {
+		t.Fatalf("pop should restore wip: %q", out)
+	}
+}
+
+func TestStashNothing(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	code, out, _ := runCLI(t, "stash")
+	if code != 0 || !strings.Contains(out, "nothing to stash") {
+		t.Fatalf("expected nothing-to-stash, out=%q", out)
+	}
+}
+
+func TestStashPopEmpty(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "stash", "pop")
+	if code != 1 || !strings.Contains(errs, "no stashes") {
+		t.Fatalf("expected no-stashes error, code=%d err=%q", code, errs)
+	}
+}
