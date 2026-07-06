@@ -57,6 +57,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCheckout(rest, stdout, stderr)
 	case "status":
 		return cmdStatus(rest, stdout, stderr)
+	case "merge-base":
+		return cmdMergeBase(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -98,8 +100,9 @@ usage:
   got diff [<branch>]          (last commit vs its parent; default HEAD)
   got diff <branchA> <branchB> (two branch heads)
   got list vertices|edges
-  got merge <listA> <listB>              (comma-separated vertex names)
-  got merge3 <ancestor> <left> <right>   (three-way, comma-separated lists)
+  got merge <branch>                     (semantic merge into the current branch)
+  got merge-base <branchA> <branchB>     (nearest common commit)
+  got merge3 <ancestor> <left> <right>   (low-level three-way frontier merge)
   got materialize                        (manifest bundle of the whole graph)
   got trace <from> <to>
   got cone <name>
@@ -817,9 +820,131 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// cmdMerge merges another branch into the current branch (HEAD) with a
+// semantic three-way merge: fast-forward when possible, else a merge commit
+// with two parents, else typed conflicts.
 func cmdMerge(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var actor string
+	fs.StringVar(&actor, "actor", "", "merge author")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "merge: expected <branch> (to merge into the current branch)")
+		return 2
+	}
+	other := fs.Arg(0)
+	cur := currentBranch()
+	if other == cur {
+		fmt.Fprintln(stderr, "merge: cannot merge a branch into itself")
+		return 1
+	}
+
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+
+	curID, ok := state.Namespace().ResolveRef(ctx, commitRefName(cur))
+	if !ok {
+		fmt.Fprintf(stderr, "merge: current branch %q has no commits\n", cur)
+		return 1
+	}
+	otherID, ok := state.Namespace().ResolveRef(ctx, commitRefName(other))
+	if !ok {
+		fmt.Fprintf(stderr, "merge: branch %q has no commits\n", other)
+		return 1
+	}
+	curC, otherC := commitFromVID(curID), commitFromVID(otherID)
+	if curC == otherC {
+		fmt.Fprintln(stdout, "already up to date")
+		return 0
+	}
+
+	base, hasBase := log.MergeBase(curC, otherC)
+	if hasBase && base == otherC {
+		fmt.Fprintln(stdout, "already up to date")
+		return 0
+	}
+	if hasBase && base == curC {
+		// Fast-forward: current has no unique commits.
+		otherCommit, _ := log.Get(otherC)
+		g, err := otherCommit.Snapshot.Build(schema())
+		if err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
+		}
+		if err := state.Namespace().BindRef(ctx, commitRefName(cur), otherID); err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
+		}
+		if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+			fmt.Fprintf(stderr, "merge: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "fast-forward: %s now at %s\n", cur, shortID(otherID[:]))
+		return 0
+	}
+
+	var baseSnap graph.Snapshot
+	if hasBase {
+		bc, _ := log.Get(base)
+		baseSnap = bc.Snapshot
+	}
+	curCommit, _ := log.Get(curC)
+	otherCommit, _ := log.Get(otherC)
+
+	mergedGraph, mr, err := newService().MergeStates(ctx, schema(), baseSnap, curCommit.Snapshot, otherCommit.Snapshot)
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	if len(mr.Conflicts) > 0 {
+		fmt.Fprintf(stdout, "merge aborted: %d conflict(s)\n", len(mr.Conflicts))
+		for _, c := range mr.Conflicts {
+			if d, ok := c.(interface{ Detail() string }); ok {
+				fmt.Fprintf(stdout, "  %s: %s\n", c.Kind(), d.Detail())
+			} else {
+				fmt.Fprintf(stdout, "  %s\n", c.Kind())
+			}
+		}
+		return 1
+	}
+
+	mergedState := repo.NewState(mergedGraph, state.Namespace())
+	c, err := newService().Commit(ctx, mergedState, log, "merge "+other+" into "+cur, actor, []history.CommitID{curC, otherC})
+	if err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	if err := saveHistory(log); err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	if err := state.Namespace().BindRef(ctx, commitRefName(cur), vidFromCommit(c.ID)); err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	if err := saveState(mergedState); err != nil {
+		fmt.Fprintf(stderr, "merge: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "merged %q into %q: %s\n", other, cur, shortID(c.ID[:]))
+	return 0
+}
+
+func cmdMergeBase(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 2 {
-		fmt.Fprintln(stderr, "merge: expected <listA> <listB> (comma-separated vertex names)")
+		fmt.Fprintln(stderr, "merge-base: expected <branchA> <branchB>")
 		return 2
 	}
 	state, err := loadState()
@@ -827,22 +952,25 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	left, err := frontierFromList(state.Graph(), args[0])
+	log, err := loadHistory()
 	if err != nil {
-		fmt.Fprintf(stderr, "merge: %v\n", err)
+		fmt.Fprintf(stderr, "merge-base: %v\n", err)
 		return 1
 	}
-	right, err := frontierFromList(state.Graph(), args[1])
-	if err != nil {
-		fmt.Fprintf(stderr, "merge: %v\n", err)
+	ctx := context.Background()
+	a, okA := state.Namespace().ResolveRef(ctx, commitRefName(args[0]))
+	b, okB := state.Namespace().ResolveRef(ctx, commitRefName(args[1]))
+	if !okA || !okB {
+		fmt.Fprintln(stderr, "merge-base: both branches must have commits")
 		return 1
 	}
-	_, mr, err := newService().Merge(context.Background(), state, left, right, nil)
-	if err != nil {
-		fmt.Fprintf(stderr, "merge: %v\n", err)
-		return 1
+	base, ok := log.MergeBase(commitFromVID(a), commitFromVID(b))
+	if !ok {
+		fmt.Fprintln(stdout, "no common ancestor")
+		return 0
 	}
-	return printMergeResult(stdout, nameIndex(state.Graph()), mr)
+	fmt.Fprintln(stdout, shortID(base[:]))
+	return 0
 }
 
 func cmdMerge3(args []string, stdout, stderr io.Writer) int {

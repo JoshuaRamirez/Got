@@ -796,3 +796,70 @@ func TestLoadHistoryEmptyDir(t *testing.T) {
 		t.Fatal("empty dir should load an empty history")
 	}
 }
+
+// --- UC-U24: semantic merge of committed states ---
+
+func mkSnap(t *testing.T, build func(*graph.Builder)) graph.Snapshot {
+	t.Helper()
+	b := graph.NewBuilder(ontology.NewDefaultSchema())
+	build(b)
+	return graph.EncodeSnapshot(b.Build())
+}
+
+func TestMergeStatesClean(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	schema := ontology.NewDefaultSchema()
+
+	base := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("base"), Type: ontology.Artifact})
+	})
+	left := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("base"), Type: ontology.Artifact})
+		b.AddVertex(graph.Vertex{ID: vid("L"), Type: ontology.Artifact})
+	})
+	right := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("base"), Type: ontology.Artifact})
+		b.AddVertex(graph.Vertex{ID: vid("R"), Type: ontology.Artifact})
+	})
+
+	g, mr, err := svc.MergeStates(ctx, schema, base, left, right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mr.Conflicts) != 0 {
+		t.Fatalf("expected clean merge, got conflicts %+v", mr.Conflicts)
+	}
+	for _, id := range []identity.VertexID{vid("base"), vid("L"), vid("R")} {
+		if _, ok := g.Vertex(id); !ok {
+			t.Fatalf("merged graph missing %v", id)
+		}
+	}
+}
+
+func TestMergeStatesConflict(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	schema := ontology.NewDefaultSchema()
+
+	base := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("x"), Type: ontology.Artifact, Attrs: graph.AttrMap{"s": "orig"}})
+	})
+	left := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("x"), Type: ontology.Artifact, Attrs: graph.AttrMap{"s": "left"}})
+	})
+	right := mkSnap(t, func(b *graph.Builder) {
+		b.AddVertex(graph.Vertex{ID: vid("x"), Type: ontology.Artifact, Attrs: graph.AttrMap{"s": "right"}})
+	})
+
+	g, mr, err := svc.MergeStates(ctx, schema, base, left, right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g != nil {
+		t.Fatal("conflicting merge must not return a merged graph")
+	}
+	if len(mr.Conflicts) == 0 {
+		t.Fatal("expected a conflict for divergent edits to the same vertex")
+	}
+}

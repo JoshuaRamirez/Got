@@ -183,6 +183,44 @@ func (l *Log) Ancestors(id CommitID) ([]Commit, error) {
 	return out, nil
 }
 
+// MergeBase returns the nearest common ancestor of commits a and b — the
+// closest ancestor of b that is also an ancestor of a (both inclusive). It is
+// the three-way merge base. Returns ok == false when the two commits share no
+// history.
+func (l *Log) MergeBase(a, b CommitID) (CommitID, bool) {
+	ancestorsA := make(map[CommitID]bool)
+	queue := []CommitID{a}
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		if ancestorsA[c] {
+			continue
+		}
+		ancestorsA[c] = true
+		if cm, ok := l.commits[c]; ok {
+			queue = append(queue, cm.Parents...)
+		}
+	}
+
+	seen := make(map[CommitID]bool)
+	queue = []CommitID{b}
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		if ancestorsA[c] {
+			return c, true
+		}
+		if cm, ok := l.commits[c]; ok {
+			queue = append(queue, cm.Parents...)
+		}
+	}
+	return CommitID{}, false
+}
+
 // --- JSON persistence ---
 
 type commitJSON struct {
