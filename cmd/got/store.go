@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -152,6 +154,130 @@ func setHEAD(branch string) error {
 		return err
 	}
 	return os.WriteFile(headPath(), []byte(branch+"\n"), 0o644)
+}
+
+// --- tags (lightweight commit names) ---
+
+func tagsPath() string { return filepath.Join(stateDir(), "tags.json") }
+
+func loadTags() (map[string]string, error) {
+	b, err := os.ReadFile(tagsPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, fmt.Errorf("corrupt tags file: %w", err)
+	}
+	if m == nil {
+		m = map[string]string{}
+	}
+	return m, nil
+}
+
+func saveTags(m map[string]string) error {
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := tagsPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, tagsPath())
+}
+
+// resolveCommit resolves a commit-ish — a branch name (its tip), a tag, or a
+// commit-id hex prefix — to a CommitID.
+func resolveCommit(state repo.State, log *history.Log, ref string) (history.CommitID, bool) {
+	if id, ok := state.Namespace().ResolveRef(context.Background(), commitRefName(ref)); ok {
+		if _, ok := log.Get(commitFromVID(id)); ok {
+			return commitFromVID(id), true
+		}
+	}
+	if tags, err := loadTags(); err == nil {
+		if h, ok := tags[ref]; ok {
+			if cid, err := decodeCommitHex(h); err == nil {
+				if _, ok := log.Get(cid); ok {
+					return cid, true
+				}
+			}
+		}
+	}
+	if len(ref) >= 4 {
+		for _, c := range log.Commits() {
+			if strings.HasPrefix(hex.EncodeToString(c.ID[:]), strings.ToLower(ref)) {
+				return c.ID, true
+			}
+		}
+	}
+	return history.CommitID{}, false
+}
+
+func decodeCommitHex(s string) (history.CommitID, error) {
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) != 32 {
+		return history.CommitID{}, fmt.Errorf("bad commit hex %q", s)
+	}
+	var id history.CommitID
+	copy(id[:], b)
+	return id, nil
+}
+
+// applySnapDelta applies a graph.Delta to a snapshot, returning the resulting
+// snapshot. Used to revert a commit: the reverse delta (c -> parent) applied to
+// the current state undoes the commit. Edges whose endpoints do not survive are
+// dropped.
+func applySnapDelta(cur graph.Snapshot, d graph.Delta) graph.Snapshot {
+	verts := make(map[string]graph.VertexSnapshot, len(cur.Vertices))
+	for _, v := range cur.Vertices {
+		verts[v.ID] = v
+	}
+	for _, v := range d.RemovedVertices {
+		delete(verts, v.ID)
+	}
+	for _, c := range d.ChangedVertices {
+		verts[c.New.ID] = c.New
+	}
+	for _, v := range d.AddedVertices {
+		verts[v.ID] = v
+	}
+
+	edges := make(map[string]graph.EdgeSnapshot, len(cur.Edges))
+	for _, e := range cur.Edges {
+		edges[e.ID] = e
+	}
+	for _, e := range d.RemovedEdges {
+		delete(edges, e.ID)
+	}
+	for _, c := range d.ChangedEdges {
+		edges[c.New.ID] = c.New
+	}
+	for _, e := range d.AddedEdges {
+		edges[e.ID] = e
+	}
+
+	var out graph.Snapshot
+	for _, v := range verts {
+		out.Vertices = append(out.Vertices, v)
+	}
+	for _, e := range edges {
+		if _, ok := verts[e.From]; !ok {
+			continue
+		}
+		if _, ok := verts[e.To]; !ok {
+			continue
+		}
+		out.Edges = append(out.Edges, e)
+	}
+	out.Hyperedges = cur.Hyperedges
+	return out
 }
 
 // headSnapshot returns the committed snapshot at a branch's tip, and whether

@@ -579,3 +579,70 @@ func TestMergeSelfRefused(t *testing.T) {
 		t.Fatalf("expected self-merge refusal, code=%d err=%q", code, errs)
 	}
 }
+
+// --- show / tag / revert (UC-U25) ---
+
+func TestTagAndShow(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add b")
+
+	if code, out, errs := runCLI(t, "tag", "v1"); code != 0 || !strings.Contains(out, "v1") {
+		t.Fatalf("tag: %s %s", errs, out)
+	}
+	_, out, _ := runCLI(t, "tags")
+	if !strings.Contains(out, "v1") {
+		t.Fatalf("tags list: %q", out)
+	}
+	// show by tag: metadata + diff.
+	code, out, _ := runCLI(t, "show", "v1")
+	if code != 0 || !strings.Contains(out, "add b") || !strings.Contains(out, "+ vertex b") {
+		t.Fatalf("show v1: %q", out)
+	}
+}
+
+func TestTagDuplicate(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "a")
+	runCLI(t, "tag", "v1")
+	code, _, errs := runCLI(t, "tag", "v1")
+	if code != 1 || !strings.Contains(errs, "already exists") {
+		t.Fatalf("expected duplicate-tag error, code=%d err=%q", code, errs)
+	}
+}
+
+func TestRevert(t *testing.T) {
+	initRepo(t)
+	runCLI(t, "add-vertex", "a", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add a")
+	runCLI(t, "add-vertex", "b", "--type", "Artifact")
+	runCLI(t, "commit", "-m", "add b")
+
+	if code, out, errs := runCLI(t, "revert", "main"); code != 0 || !strings.Contains(out, "reverted") {
+		t.Fatalf("revert: %s %s", errs, out)
+	}
+	// b is gone from the working tree.
+	_, out, _ := runCLI(t, "list", "vertices")
+	if strings.Contains(out, "b\t") {
+		t.Fatalf("revert should have removed b: %q", out)
+	}
+	if !strings.Contains(out, "a\t") {
+		t.Fatalf("a should remain: %q", out)
+	}
+	// log shows the Revert commit on top.
+	_, out, _ = runCLI(t, "log")
+	if !strings.Contains(out, "Revert: add b") {
+		t.Fatalf("expected a revert commit: %q", out)
+	}
+}
+
+func TestShowUnknown(t *testing.T) {
+	initRepo(t)
+	code, _, errs := runCLI(t, "show", "nope")
+	if code != 1 || !strings.Contains(errs, "unknown commit-ish") {
+		t.Fatalf("expected unknown-commit-ish, code=%d err=%q", code, errs)
+	}
+}

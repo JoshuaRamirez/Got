@@ -66,6 +66,8 @@ When a UC is retired:
 
 | [UC-U24](user/UC-U24-merge-branches.md) | Merge a branch semantically | Verified | `internal/repo/merge.go` (`MergeStates`), `internal/history/history.go` (`MergeBase`), `cmd/got` (`merge`, `merge-base`) | `internal/repo/repo_test.go`, `internal/history/history_test.go`, `cmd/got/run_test.go` | 2026-06-16 | merge <branch> into HEAD: MergeBase finds the common commit; fast-forward when current is an ancestor; else semantic three-way merge (UC-U18) of the two tip states -> merge commit with two parents, or typed conflicts (abort). Tests: history merge-base (LCA + unrelated), repo MergeStates clean/conflict, CLI divergent-merge/fast-forward/merge-base/self-refused. Semantic (not textual) branch merge — the headline git-beating op. |
 
+| [UC-U25](user/UC-U25-show-tag-revert.md) | Inspect, tag, and revert commits | Verified | `cmd/got` (`show`, `tag`/`tags`, `revert`; commit-ish resolution + tags.json in store.go) | `cmd/got/run_test.go` | 2026-06-16 | show <commit-ish> prints commit metadata + structural diff vs parent; commit-ish resolves a branch tip, tag, or commit-id prefix. tag/tags name commits (tags.json). revert applies the structural reverse-delta of a commit onto the working graph and records a Revert commit. Tests: tag+show, duplicate-tag, revert (removes added vertex, Revert commit in log), unknown-commit-ish. |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -104,11 +106,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 24 | 0 | 24 |
+| User | 0 | 0 | 0 | 25 | 0 | 25 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **51** | **0** | **51** |
+| **Total** | **0** | **0** | **0** | **52** | **0** | **52** |
 
-**Verified coverage: 51 / 51 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 52 / 52 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added
