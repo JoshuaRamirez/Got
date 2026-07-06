@@ -62,6 +62,8 @@ When a UC is retired:
 
 | [UC-U22](user/UC-U22-record-browse-history.md) | Record and browse repository history | Verified | `internal/repo/commit.go` (`Commit`, `LoadHistory`, `SaveHistory`), `cmd/got` (`commit`, `log`) | `internal/repo/repo_test.go`, `cmd/got/run_test.go` | 2026-06-16 | repo.Commit snapshots the current graph into a new commit with a computed vertex-delta and parent = branch's current commit; persisted to history.json; branch commit pointer (commit:<branch> ref) advances. CLI commit -m / log (newest-first ancestry). Tests: commit + ancestry + delta, save/load, empty-dir, CLI commit/log order+authors, no-commits, message-required, persistence. Non-lossy commit history — the git-loses-information fix, end to end. |
 
+| [UC-U23](user/UC-U23-current-branch-checkout-status.md) | Switch branches and see working status | Verified | `cmd/got` (`checkout`/`switch`, `status`, HEAD; `run.go`, `store.go`) | `cmd/got/run_test.go` | 2026-06-16 | Git-style HEAD file (current branch); init sets HEAD=main. checkout/switch [-b] [--force] updates the working graph to the target branch's committed snapshot with dirty-tree safety and branch-existence check. status shows current branch + uncommitted content changes (branch vertices excluded via contentOnly). commit/log/diff default to HEAD. Tests: status flow, checkout -b + working-tree-follows-HEAD, nonexistent, dirty-refused + --force, first-class-branch-not-dirty. |
+
 ## System use cases
 
 | ID | Title | Status | Implementation | Tests | Last reviewed | Notes |
@@ -100,11 +102,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 22 | 0 | 22 |
+| User | 0 | 0 | 0 | 23 | 0 | 23 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **49** | **0** | **49** |
+| **Total** | **0** | **0** | **0** | **50** | **0** | **50** |
 
-**Verified coverage: 49 / 49 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 50 / 50 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added

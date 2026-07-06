@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/history"
@@ -125,3 +127,43 @@ func commitRefName(branch string) namespace.RefName { return namespace.RefName("
 // stores VertexIDs, so branch commit pointers are round-tripped through these.
 func vidFromCommit(c history.CommitID) identity.VertexID { return identity.VertexID(c) }
 func commitFromVID(v identity.VertexID) history.CommitID { return history.CommitID(v) }
+
+// --- HEAD (current branch) ---
+
+// headPath is the git-style file naming the current branch.
+func headPath() string { return filepath.Join(stateDir(), "HEAD") }
+
+// currentBranch returns the branch HEAD points at, defaulting to "main".
+func currentBranch() string {
+	b, err := os.ReadFile(headPath())
+	if err != nil {
+		return "main"
+	}
+	name := strings.TrimSpace(string(b))
+	if name == "" {
+		return "main"
+	}
+	return name
+}
+
+// setHEAD points HEAD at the given branch name.
+func setHEAD(branch string) error {
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(headPath(), []byte(branch+"\n"), 0o644)
+}
+
+// headSnapshot returns the committed snapshot at a branch's tip, and whether
+// the branch has any commit.
+func headSnapshot(state repo.State, log *history.Log, branch string) (graph.Snapshot, bool) {
+	id, ok := state.Namespace().ResolveRef(context.Background(), commitRefName(branch))
+	if !ok {
+		return graph.Snapshot{}, false
+	}
+	c, ok := log.Get(commitFromVID(id))
+	if !ok {
+		return graph.Snapshot{}, false
+	}
+	return c.Snapshot, true
+}

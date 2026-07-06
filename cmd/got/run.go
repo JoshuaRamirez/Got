@@ -53,6 +53,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdLog(rest, stdout, stderr)
 	case "diff":
 		return cmdDiff(rest, stdout, stderr)
+	case "checkout", "switch":
+		return cmdCheckout(rest, stdout, stderr)
+	case "status":
+		return cmdStatus(rest, stdout, stderr)
 	case "list":
 		return cmdList(rest, stdout, stderr)
 	case "merge":
@@ -87,9 +91,11 @@ usage:
   got branch <name> [--from <parent>] [--tip <vertex>] [--desc <text>]
   got branches
   got branch-log <name>
+  got status
+  got checkout <branch>   (alias: switch; --force to discard uncommitted changes)
   got commit -m <message> [--branch <name>] [--actor <name>]
   got log [<branch>]
-  got diff <branch>            (last commit vs its parent)
+  got diff [<branch>]          (last commit vs its parent; default HEAD)
   got diff <branchA> <branchB> (two branch heads)
   got list vertices|edges
   got merge <listA> <listB>              (comma-separated vertex names)
@@ -141,8 +147,163 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "init: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "initialized empty repository at %s\n", stateDir())
+	if err := setHEAD("main"); err != nil {
+		fmt.Fprintf(stderr, "init: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "initialized empty repository at %s (on branch main)\n", stateDir())
 	return 0
+}
+
+func cmdStatus(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "status: takes no arguments")
+		return 2
+	}
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "status: %v\n", err)
+		return 1
+	}
+	branch := currentBranch()
+	fmt.Fprintf(stdout, "On branch %s\n", branch)
+
+	headSnap, hasCommit := headSnapshot(state, log, branch)
+	if !hasCommit {
+		fmt.Fprintln(stdout, "No commits yet.")
+	}
+	delta := graph.Diff(contentOnly(headSnap), contentOnly(graph.EncodeSnapshot(state.Graph())))
+	if delta.Empty() {
+		fmt.Fprintln(stdout, "nothing to commit, working graph clean")
+		return 0
+	}
+	fmt.Fprintln(stdout, "Uncommitted changes:")
+	printDelta(stdout, delta)
+	return 0
+}
+
+func cmdCheckout(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkout", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var force, create bool
+	fs.BoolVar(&force, "force", false, "discard uncommitted changes")
+	fs.BoolVar(&create, "b", false, "create the branch at the current commit")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "checkout: expected [-b] <branch>")
+		return 2
+	}
+	target := fs.Arg(0)
+
+	state, err := loadState()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	log, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(stderr, "checkout: %v\n", err)
+		return 1
+	}
+	ctx := context.Background()
+	cur := currentBranch()
+
+	if create {
+		if branchExists(state, target) {
+			fmt.Fprintf(stderr, "checkout: branch %q already exists\n", target)
+			return 1
+		}
+		// New branch starts at the current branch's commit; working graph stays.
+		if id, ok := state.Namespace().ResolveRef(ctx, commitRefName(cur)); ok {
+			if err := state.Namespace().BindRef(ctx, commitRefName(target), id); err != nil {
+				fmt.Fprintf(stderr, "checkout: %v\n", err)
+				return 1
+			}
+		}
+		if err := setHEAD(target); err != nil {
+			fmt.Fprintf(stderr, "checkout: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "created and switched to branch %q\n", target)
+		return 0
+	}
+
+	if !branchExists(state, target) {
+		fmt.Fprintf(stderr, "checkout: no such branch %q (use -b to create)\n", target)
+		return 1
+	}
+
+	// Safety: refuse to switch away from uncommitted content changes.
+	curHead, _ := headSnapshot(state, log, cur)
+	if !force && !graph.Diff(contentOnly(curHead), contentOnly(graph.EncodeSnapshot(state.Graph()))).Empty() {
+		fmt.Fprintf(stderr, "checkout: uncommitted changes on %q; commit them or use --force\n", cur)
+		return 1
+	}
+
+	// Update the working graph to the target branch's committed state.
+	targetSnap, hasCommit := headSnapshot(state, log, target)
+	var g graph.Graph
+	if hasCommit {
+		g, err = targetSnap.Build(schema())
+		if err != nil {
+			fmt.Fprintf(stderr, "checkout: %v\n", err)
+			return 1
+		}
+	} else {
+		g = graph.NewGraph(schema())
+	}
+	if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+		fmt.Fprintf(stderr, "checkout: %v\n", err)
+		return 1
+	}
+	if err := setHEAD(target); err != nil {
+		fmt.Fprintf(stderr, "checkout: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "switched to branch %q\n", target)
+	return 0
+}
+
+// branchExists reports whether a branch is known — it has a commit pointer or
+// a first-class BranchSelector vertex, or it is the current HEAD branch.
+func branchExists(state repo.State, branch string) bool {
+	if _, ok := state.Namespace().ResolveRef(context.Background(), commitRefName(branch)); ok {
+		return true
+	}
+	if _, ok := state.Graph().Vertex(repo.BranchVID(branch)); ok {
+		return true
+	}
+	return branch == currentBranch()
+}
+
+// contentOnly drops BranchSelector vertices (and edges touching them) from a
+// snapshot, so first-class branch metadata does not count as versioned content
+// in status/diff.
+func contentOnly(s graph.Snapshot) graph.Snapshot {
+	branchIDs := make(map[string]bool)
+	var out graph.Snapshot
+	for _, v := range s.Vertices {
+		if v.Type == string(ontology.BranchSelector) {
+			branchIDs[v.ID] = true
+			continue
+		}
+		out.Vertices = append(out.Vertices, v)
+	}
+	for _, e := range s.Edges {
+		if branchIDs[e.From] || branchIDs[e.To] {
+			continue
+		}
+		out.Edges = append(out.Edges, e)
+	}
+	out.Hyperedges = s.Hyperedges
+	return out
 }
 
 func cmdAddVertex(args []string, stdout, stderr io.Writer) int {
@@ -412,7 +573,7 @@ func cmdCommit(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var message, branch, actor string
 	fs.StringVar(&message, "m", "", "commit message (required)")
-	fs.StringVar(&branch, "branch", "main", "branch to commit on")
+	fs.StringVar(&branch, "branch", "", "branch to commit on (default: current)")
 	fs.StringVar(&actor, "actor", "", "commit author")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -420,6 +581,9 @@ func cmdCommit(args []string, stdout, stderr io.Writer) int {
 	if message == "" {
 		fmt.Fprintln(stderr, "commit: -m <message> is required")
 		return 2
+	}
+	if branch == "" {
+		branch = currentBranch()
 	}
 
 	state, err := loadState()
@@ -465,7 +629,7 @@ func cmdCommit(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdLog(args []string, stdout, stderr io.Writer) int {
-	branch := "main"
+	branch := currentBranch()
 	if len(args) == 1 {
 		branch = args[0]
 	} else if len(args) > 1 {
@@ -503,9 +667,12 @@ func cmdLog(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdDiff(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 || len(args) > 2 {
-		fmt.Fprintln(stderr, "diff: expected <branch> or <branchA> <branchB>")
+	if len(args) > 2 {
+		fmt.Fprintln(stderr, "diff: expected [<branch>] or <branchA> <branchB>")
 		return 2
+	}
+	if len(args) == 0 {
+		args = []string{currentBranch()}
 	}
 	state, err := loadState()
 	if err != nil {
@@ -550,7 +717,7 @@ func cmdDiff(args []string, stdout, stderr io.Writer) int {
 		oldSnap, newSnap = a.Snapshot, b.Snapshot
 	}
 
-	printDelta(stdout, graph.Diff(oldSnap, newSnap))
+	printDelta(stdout, graph.Diff(contentOnly(oldSnap), contentOnly(newSnap)))
 	return 0
 }
 
@@ -628,7 +795,13 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 	}
 	g := state.Graph()
 	if args[0] == "vertices" {
-		verts := append([]graph.Vertex(nil), g.Vertices()...)
+		verts := make([]graph.Vertex, 0, len(g.Vertices()))
+		for _, v := range g.Vertices() {
+			if v.Type == ontology.BranchSelector {
+				continue // branches are shown by `got branches`
+			}
+			verts = append(verts, v)
+		}
 		sort.Slice(verts, func(i, j int) bool { return nameOf(verts[i]) < nameOf(verts[j]) })
 		for _, v := range verts {
 			fmt.Fprintf(stdout, "%s\t%s\n", nameOf(v), v.Type)

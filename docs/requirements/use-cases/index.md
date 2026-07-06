@@ -29,6 +29,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U20](user/UC-U20-persist-reload-repository.md) | Persist and reload a repository | Repository host | `repo` |
 | [UC-U21](user/UC-U21-first-class-branches.md) | Manage first-class branches | Integrator | `repo` |
 | [UC-U22](user/UC-U22-record-browse-history.md) | Record and browse repository history | Author / Integrator | `repo`, `cmd/got` |
+| [UC-U23](user/UC-U23-current-branch-checkout-status.md) | Switch branches and see working status | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 

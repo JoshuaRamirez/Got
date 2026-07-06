@@ -48,8 +48,10 @@ go build -o got ./cmd/got
 ./got branches            # each branch is a real object with metadata + parent
 ./got branch-log hotfix   # fork ancestry: hotfix <- release-2 <- main
 ./got commit -m "add art" --actor you   # record current state as a commit
+./got status              # current branch + uncommitted changes
+./got checkout -b feature # create + switch branch (working tree follows HEAD)
 ./got log                 # branch history, newest first (non-lossy)
-./got diff main           # structural diff of the last commit vs its parent
+./got diff                # structural diff of HEAD's last commit vs its parent
 ./got trace exec art      # causal paths via the provenance engine
 ./got cone exec           # provenance cone
 ```
