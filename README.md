@@ -56,6 +56,7 @@ go build -o got ./cmd/got
 ./got blame report        # which commit introduced / last changed a node (per-node, not per-line)
 ./got rebase main         # replay the current branch's commits onto another (linear)
 ./got reflog              # journal of HEAD/branch tip moves, newest first (recover dropped commits)
+./got bisect start bad good ; ./got bisect run ./test.sh   # binary-search history for the first bad commit
 ./got log                 # branch history, newest first (non-lossy)
 ./got diff                # structural diff of HEAD's last commit vs its parent
 ./got trace exec art      # causal paths via the provenance engine

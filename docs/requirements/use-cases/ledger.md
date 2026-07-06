@@ -81,6 +81,7 @@ When a UC is retired:
 | [UC-U31](user/UC-U31-rebase.md) | Rebase a branch onto another | Verified | `cmd/got` (`rebase`) | `cmd/got/run_test.go` | 2026-06-16 | rebase <onto>: replay the current branch's commits above the merge base onto <onto>'s tip as new commits (linear history rewrite); fast-forward when current is an ancestor, up-to-date when onto is; refuse unrelated histories / self. Tests: rebase (linear m1<-f1 + working tree), fast-forward, up-to-date. |
 | [UC-U32](user/UC-U32-merge-strategy.md) | Resolve a merge with a strategy | Verified | `internal/repo/merge.go` (`MergeStatesStrategy`), `cmd/got` (`merge --ours`/`--theirs`) | `internal/repo/repo_test.go`, `cmd/got/run_test.go` | 2026-06-16 | Plain `merge` aborts on typed conflicts with a hint; `merge <branch> --ours`/`--theirs` runs a per-vertex/per-edge three-way merge with a tiebreaker (agreed and one-sided changes taken; genuine same-target conflict picks our/their side; modify/delete honors the chosen action). Both flags together rejected. Tests: MergeStatesStrategy (add/add conflict → ours=left, theirs=right), CLI abort, ours/theirs outcome, mutual exclusion. |
 | [UC-U33](user/UC-U33-reflog.md) | Review and recover ref movements with the reflog | Verified | `cmd/got/reflog.go` (`setBranchTip`/`logHEADMove`/`appendReflog`), `cmd/got` (`reflog`) | `cmd/got/run_test.go` | 2026-06-16 | Append-only journal of ref movements. Every commit/checkout/reset/merge/rebase/amend/revert/cherry-pick records the ref, old/new tip, action, and message; current-branch moves mirror a `HEAD` entry. `reflog` shows HEAD newest-first, `reflog <ref>` filters one branch, `--all` interleaves all. Dropped commits (post-reset) stay reachable in the journal. Tests: HEAD activity + order, per-ref filter + checkout move, recover-after-reset, before-init hint. |
+| [UC-U34](user/UC-U34-bisect.md) | Bisect history to find the first bad commit | Verified | `cmd/got/bisect.go` (`cmdBisect` + suspect-set / candidate-pick), `cmd/got` (`bisect`) | `cmd/got/run_test.go` | 2026-06-16 | Binary search over the DAG suspect set (ancestors(bad) \ ancestors(good) \ {bad}). `start <bad> <good>` (validates ancestry), `good`/`bad` verdicts narrow and check out the next optimal candidate to the working graph (detached — no ref moves), `run <cmd>` automates (exit 0 good / non-zero bad), `reset` restores the origin branch, `status` reports the boundary. Tests: manual convergence to c3 in a linear c0..c5 with reset, ancestry/unknown-ref validation, verdict-without-session, idle status. |
 
 ## System use cases
 
@@ -120,11 +121,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 33 | 0 | 33 |
+| User | 0 | 0 | 0 | 34 | 0 | 34 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **60** | **0** | **60** |
+| **Total** | **0** | **0** | **0** | **61** | **0** | **61** |
 
-**Verified coverage: 60 / 60 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 61 / 61 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added
