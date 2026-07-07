@@ -37,6 +37,8 @@ each subcommand (see `docs/requirements/use-cases/user/UC-U19-operate-from-cli.m
 go build -o got ./cmd/got
 
 ./got init
+./got add src/ ; ./got commit -m "import" --actor you   # version REAL files, then...
+./got checkout -b feature ; ./got extract ./out          # ...check a branch's files back out to disk
 ./got add-vertex exec --type Execution
 ./got add-vertex art  --type Artifact
 ./got add-edge   e1   --type materializes --from exec --to art

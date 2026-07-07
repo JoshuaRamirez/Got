@@ -43,6 +43,35 @@ func TestCommitContentAddressed(t *testing.T) {
 	}
 }
 
+// A vertex id is content-addressed on its name (e.g. a file path), so editing a
+// file in place keeps the same vertex id but changes its attributes. The commit
+// id must still differ, or Log.Add would silently drop the second commit and
+// checkout would return stale content.
+func TestCommitIDReflectsAttrs(t *testing.T) {
+	snapWithContent := func(content string) graph.Snapshot {
+		g := graph.NewGraph(ontology.NewDefaultSchema())
+		g, err := g.WithVertex(graph.Vertex{
+			ID:    vid("main.go"),
+			Type:  ontology.Artifact,
+			Attrs: graph.AttrMap{"file.content": content},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return graph.EncodeSnapshot(g)
+	}
+	v1 := history.NewCommit(nil, "wip", "alice", nil, nil, snapWithContent("package main // v1"))
+	v2 := history.NewCommit(nil, "wip", "alice", nil, nil, snapWithContent("package main // v2"))
+	if v1.ID == v2.ID {
+		t.Fatal("same path + same message but different content must yield distinct commit IDs")
+	}
+	// And identical content still dedups.
+	v1again := history.NewCommit(nil, "wip", "alice", nil, nil, snapWithContent("package main // v1"))
+	if v1.ID != v1again.ID {
+		t.Fatal("identical content should share a commit ID")
+	}
+}
+
 // Consumed/Produced are annotation, not identity.
 func TestCommitDeltaNotInID(t *testing.T) {
 	a := history.NewCommit(nil, "m", "a", []identity.VertexID{vid("z")}, []identity.VertexID{vid("x")}, snap(t, "x"))

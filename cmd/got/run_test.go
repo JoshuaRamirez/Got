@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -1194,5 +1196,144 @@ func TestBisectStatusIdle(t *testing.T) {
 	bisectHistory(t)
 	if code, out, _ := runCLI(t, "bisect", "status"); code != 0 || !strings.Contains(out, "no bisect in progress") {
 		t.Fatalf("expected idle status, code=%d out=%q", code, out)
+	}
+}
+
+// --- file versioning (UC-U35): real files through the graph ---
+
+// initRepoInDir chdirs into a fresh temp working directory with a repo state
+// dir at ./.got, so `add`/`extract` operate on real relative paths.
+func initRepoInDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("GOT_DIR", ".got")
+	if code, _, errs := runCLI(t, "init"); code != 0 {
+		t.Fatalf("init: %s", errs)
+	}
+	return dir
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestFileRoundTrip is the proof that Got versions actual files: ingest, commit,
+// branch, edit, commit, then check that extracting each branch's state renders
+// the exact bytes for that branch — and that switching branches reverts the
+// working tree.
+func TestFileRoundTrip(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "src/a.go", "package main // A\n")
+	writeFile(t, "src/b.go", "package main // B\n")
+	if code, _, errs := runCLI(t, "add", "src"); code != 0 {
+		t.Fatalf("add: %s", errs)
+	}
+	if code, _, errs := runCLI(t, "commit", "-m", "c1", "--actor", "alice"); code != 0 {
+		t.Fatalf("commit c1: %s", errs)
+	}
+
+	// Branch and edit a.go on the branch.
+	runCLI(t, "checkout", "-b", "feature")
+	writeFile(t, "src/a.go", "package main // A EDITED\n")
+	runCLI(t, "add", "src/a.go")
+	if code, _, errs := runCLI(t, "commit", "-m", "c2", "--actor", "alice"); code != 0 {
+		t.Fatalf("commit c2: %s", errs)
+	}
+
+	// Extract the feature state: a.go is the edited version.
+	if code, _, errs := runCLI(t, "extract", "featout"); code != 0 {
+		t.Fatalf("extract feature: %s", errs)
+	}
+	if got := readFile(t, "featout/src/a.go"); got != "package main // A EDITED\n" {
+		t.Fatalf("feature a.go = %q, want edited", got)
+	}
+
+	// Switch to main: the working graph reverts; extracting gives the originals.
+	runCLI(t, "checkout", "main")
+	if code, _, errs := runCLI(t, "extract", "mainout"); code != 0 {
+		t.Fatalf("extract main: %s", errs)
+	}
+	if got := readFile(t, "mainout/src/a.go"); got != "package main // A\n" {
+		t.Fatalf("main a.go = %q, want pre-edit original", got)
+	}
+	if got := readFile(t, "mainout/src/b.go"); got != "package main // B\n" {
+		t.Fatalf("main b.go = %q, want original", got)
+	}
+}
+
+// TestFileMergeDisjoint proves the graph's per-file merge: two branches editing
+// different files merge cleanly and both edits survive — no line-based patching.
+func TestFileMergeDisjoint(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "src/a.go", "A0\n")
+	writeFile(t, "src/b.go", "B0\n")
+	runCLI(t, "add", "src")
+	runCLI(t, "commit", "-m", "base", "--actor", "x")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "src/a.go", "A0\nA1\n")
+	runCLI(t, "add", "src/a.go")
+	runCLI(t, "commit", "-m", "A edits a", "--actor", "x")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "src/b.go", "B0\nB1\n")
+	runCLI(t, "add", "src/b.go")
+	runCLI(t, "commit", "-m", "B edits b", "--actor", "x")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("merge should be clean: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if got := readFile(t, "out/src/a.go"); got != "A0\nA1\n" {
+		t.Fatalf("merged a.go = %q, want A's edit", got)
+	}
+	if got := readFile(t, "out/src/b.go"); got != "B0\nB1\n" {
+		t.Fatalf("merged b.go = %q, want B's edit", got)
+	}
+}
+
+// TestFileCommitContentAddressed proves a real edit produces a distinct commit
+// even with an identical message — the computeID content-digest fix.
+func TestFileCommitContentAddressed(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "f.go", "v1\n")
+	runCLI(t, "add", "f.go")
+	_, out1, _ := runCLI(t, "commit", "-m", "wip", "--actor", "x")
+	writeFile(t, "f.go", "v2\n")
+	runCLI(t, "add", "f.go")
+	_, out2, _ := runCLI(t, "commit", "-m", "wip", "--actor", "x")
+	id1 := strings.Fields(out1)[1]
+	id2 := strings.Fields(out2)[1]
+	if id1 == id2 {
+		t.Fatalf("same message + different content must differ: both %s", id1)
+	}
+}
+
+func TestExtractPathSafety(t *testing.T) {
+	if _, err := safeJoin("out", "../escape"); err == nil {
+		t.Fatal("expected traversal rejection")
+	}
+	if _, err := safeJoin("out", "/etc/passwd"); err == nil {
+		t.Fatal("expected absolute-path rejection")
+	}
+	if p, err := safeJoin("out", "src/a.go"); err != nil || p != filepath.Join("out", "src/a.go") {
+		t.Fatalf("safe path mishandled: p=%q err=%v", p, err)
 	}
 }
