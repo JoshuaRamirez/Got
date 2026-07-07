@@ -34,6 +34,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch cmd {
 	case "init":
 		return cmdInit(rest, stdout, stderr)
+	case "add":
+		return cmdAdd(rest, stdout, stderr)
+	case "extract":
+		return cmdExtract(rest, stdout, stderr)
 	case "add-vertex":
 		return cmdAddVertex(rest, stdout, stderr)
 	case "add-edge":
@@ -113,6 +117,8 @@ func usage(w io.Writer) {
 
 usage:
   got init
+  got add <path>...            (ingest real files/dirs into the working graph)
+  got extract [<dir>]          (write committed files back to disk; default .)
   got add-vertex <name> --type <VertexType> [--attr k=v ...]
   got add-edge <name> --type <EdgeType> --from <v> --to <v>
   got bind <ref> <vertex>

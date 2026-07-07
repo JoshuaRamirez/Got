@@ -63,10 +63,18 @@ func NewCommit(parents []CommitID, message, actor string, consumed, produced []i
 	return c
 }
 
-// computeID hashes the parents, message, actor, and the sorted element IDs of
-// the resulting snapshot. Consumed/Produced are annotation, not identity — two
-// commits reaching the same state from the same parents are the same commit
-// (mirrors git: id = hash(tree, parents, author, message)).
+// computeID hashes the parents, message, actor, and a per-element content
+// digest of the resulting snapshot. Consumed/Produced are annotation, not
+// identity — two commits reaching the same state from the same parents are the
+// same commit (mirrors git: id = hash(tree, parents, author, message)).
+//
+// The tree digest folds in each element's full content (id, type, attributes,
+// and structural fields), not just its id. This matters because a vertex id is
+// content-addressed on its *name* (e.g. a file path), so two trees that differ
+// only in a vertex's attributes — a file edited in place at the same path —
+// share vertex ids. Hashing bare ids would collide those trees to one commit
+// id, and Log.Add would silently drop the second. Digesting content keeps such
+// commits distinct.
 func computeID(parents []CommitID, message, actor string, snap graph.Snapshot) CommitID {
 	h := sha256.New()
 	h.Write([]byte("history.commit\x00"))
@@ -85,30 +93,40 @@ func computeID(parents []CommitID, message, actor string, snap graph.Snapshot) C
 	h.Write([]byte("\x00actor\x00"))
 	h.Write([]byte(actor))
 
-	writeSorted := func(tag string, ids []string) {
+	writeSorted := func(tag string, digests []string) {
 		h.Write([]byte(tag))
-		s := append([]string(nil), ids...)
+		s := append([]string(nil), digests...)
 		sort.Strings(s)
-		for _, id := range s {
-			h.Write([]byte(id))
+		for _, d := range s {
+			h.Write([]byte(d))
 			h.Write([]byte{0})
 		}
 	}
-	vids := make([]string, len(snap.Vertices))
+	// A canonical JSON encoding of each element is its content digest: Go sorts
+	// map keys, so AttrMap serializes deterministically, and struct fields have
+	// a fixed order.
+	digest := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v) // unreachable for snapshot types
+		}
+		return string(b)
+	}
+	vds := make([]string, len(snap.Vertices))
 	for i, v := range snap.Vertices {
-		vids[i] = v.ID
+		vds[i] = digest(v)
 	}
-	eids := make([]string, len(snap.Edges))
+	eds := make([]string, len(snap.Edges))
 	for i, e := range snap.Edges {
-		eids[i] = e.ID
+		eds[i] = digest(e)
 	}
-	hids := make([]string, len(snap.Hyperedges))
+	hds := make([]string, len(snap.Hyperedges))
 	for i, he := range snap.Hyperedges {
-		hids[i] = he.ID
+		hds[i] = digest(he)
 	}
-	writeSorted("\x00v\x00", vids)
-	writeSorted("\x00e\x00", eids)
-	writeSorted("\x00h\x00", hids)
+	writeSorted("\x00v\x00", vds)
+	writeSorted("\x00e\x00", eds)
+	writeSorted("\x00h\x00", hds)
 
 	var id CommitID
 	copy(id[:], h.Sum(nil))
