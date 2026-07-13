@@ -1234,17 +1234,22 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 	curCommit, _ := log.Get(curC)
 	otherCommit, _ := log.Get(otherC)
 
+	// Pre-pass: dissolve same-file conflicts that are really disjoint chunk
+	// edits, by merging each contested file at chunk granularity through the
+	// graph engine. Files that still conflict are left for the file-level merge.
+	curSnap, otherSnap := reconcileFilesByChunk(baseSnap, curCommit.Snapshot, otherCommit.Snapshot)
+
 	var mergedGraph graph.Graph
 	if ours || theirs {
 		// Resolve conflicts by strategy instead of aborting.
-		mergedGraph, err = newService().MergeStatesStrategy(schema(), baseSnap, curCommit.Snapshot, otherCommit.Snapshot, ours)
+		mergedGraph, err = newService().MergeStatesStrategy(schema(), baseSnap, curSnap, otherSnap, ours)
 		if err != nil {
 			fmt.Fprintf(stderr, "merge: %v\n", err)
 			return 1
 		}
 	} else {
 		var mr composition.MergeResult
-		mergedGraph, mr, err = newService().MergeStates(ctx, schema(), baseSnap, curCommit.Snapshot, otherCommit.Snapshot)
+		mergedGraph, mr, err = newService().MergeStates(ctx, schema(), baseSnap, curSnap, otherSnap)
 		if err != nil {
 			fmt.Fprintf(stderr, "merge: %v\n", err)
 			return 1

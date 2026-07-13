@@ -83,6 +83,7 @@ When a UC is retired:
 | [UC-U33](user/UC-U33-reflog.md) | Review and recover ref movements with the reflog | Verified | `cmd/got/reflog.go` (`setBranchTip`/`logHEADMove`/`appendReflog`), `cmd/got` (`reflog`) | `cmd/got/run_test.go` | 2026-06-16 | Append-only journal of ref movements. Every commit/checkout/reset/merge/rebase/amend/revert/cherry-pick records the ref, old/new tip, action, and message; current-branch moves mirror a `HEAD` entry. `reflog` shows HEAD newest-first, `reflog <ref>` filters one branch, `--all` interleaves all. Dropped commits (post-reset) stay reachable in the journal. Tests: HEAD activity + order, per-ref filter + checkout move, recover-after-reset, before-init hint. |
 | [UC-U34](user/UC-U34-bisect.md) | Bisect history to find the first bad commit | Verified | `cmd/got/bisect.go` (`cmdBisect` + suspect-set / candidate-pick), `cmd/got` (`bisect`) | `cmd/got/run_test.go` | 2026-06-16 | Binary search over the DAG suspect set (ancestors(bad) \ ancestors(good) \ {bad}). `start <bad> <good>` (validates ancestry), `good`/`bad` verdicts narrow and check out the next optimal candidate to the working graph (detached — no ref moves), `run <cmd>` automates (exit 0 good / non-zero bad), `reset` restores the origin branch, `status` reports the boundary. Tests: manual convergence to c3 in a linear c0..c5 with reset, ancestry/unknown-ref validation, verdict-without-session, idle status. |
 | [UC-U35](user/UC-U35-version-files.md) | Version real files through the graph | Verified | `cmd/got/files.go` (`add`/`extract`), `internal/history/history.go` (`computeID` content digest) | `cmd/got/run_test.go`, `internal/history/history_test.go` | 2026-06-16 | `add <path>...` ingests real files/dirs as Artifact vertices named by path (bytes base64 under `file.content`, perms under `file.mode`); `extract [<dir>]` renders file vertices back to disk. Commit/branch/merge version them for free. computeID now folds each element's content digest so an in-place edit at the same path is a distinct commit (was: bare-id hash → collision → `Log.Add` silently dropped the second). Tests: full round-trip on real source (branch/edit/extract byte-match + branch revert), disjoint-file merge, same-message-diff-content distinct ids, path-traversal safety; history unit test for attr-sensitive ids. |
+| [UC-U36](user/UC-U36-chunk-merge.md) | Merge a file at chunk granularity | Verified | `cmd/got/chunk.go` (block chunker), `cmd/got/chunkmerge.go` (`reconcileFilesByChunk` over `repo.MergeStates`) | `cmd/got/chunk_test.go`, `cmd/got/run_test.go` | 2026-06-16 | Pre-pass before file-level merge: decomposes each both-sides-changed file into signature-keyed top-level blocks and runs them through the same graph three-way engine at chunk granularity; clean → rewrites both sides to the merged file, dissolving the conflict. Verified head-to-head vs git: two branches adding a new function at the same location (git conflicts) merge cleanly keeping both; correctness guard: same-chunk divergent edits still conflict (resolvable via --ours/--theirs). Honest limits (in UC): parser-free block tier, insertion-ordering heuristic. Tests: Split/Join round-trip, key stability across body edits, distinct/duplicate keys, same-location-adds clean merge, same-chunk conflict. |
 
 ## System use cases
 
@@ -122,11 +123,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 35 | 0 | 35 |
+| User | 0 | 0 | 0 | 36 | 0 | 36 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **62** | **0** | **62** |
+| **Total** | **0** | **0** | **0** | **63** | **0** | **63** |
 
-**Verified coverage: 62 / 62 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 63 / 63 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added

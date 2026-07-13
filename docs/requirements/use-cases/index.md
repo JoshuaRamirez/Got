@@ -42,6 +42,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U33](user/UC-U33-reflog.md) | Review and recover ref movements with the reflog | Developer | `cmd/got` |
 | [UC-U34](user/UC-U34-bisect.md) | Bisect history to find the first bad commit | Developer | `cmd/got` |
 | [UC-U35](user/UC-U35-version-files.md) | Version real files through the graph | Developer | `cmd/got`, `history` |
+| [UC-U36](user/UC-U36-chunk-merge.md) | Merge a file at chunk granularity | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 

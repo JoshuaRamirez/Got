@@ -1337,3 +1337,80 @@ func TestExtractPathSafety(t *testing.T) {
 		t.Fatalf("safe path mishandled: p=%q err=%v", p, err)
 	}
 }
+
+// --- chunk-level file merge (UC-U36) ---
+
+// TestChunkMergeSameLocationAdds is the headline case: two branches each add a
+// new function at the same location (end of file). Git conflicts on the shared
+// insertion point; Got merges at chunk granularity and keeps both.
+func TestChunkMergeSameLocationAdds(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc Alpha() int {\n\treturn 1\n}\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", base+"\nfunc Gamma() int {\n\treturn 3\n}\n")
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "add Gamma", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", base+"\nfunc Delta() int {\n\treturn 4\n}\n")
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "add Delta", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("chunk merge should be clean: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	merged := readFile(t, "out/m.go")
+	if !strings.Contains(merged, "Gamma") {
+		t.Fatalf("merged file missing featA's Gamma:\n%s", merged)
+	}
+	if !strings.Contains(merged, "Delta") {
+		t.Fatalf("merged file missing featB's Delta:\n%s", merged)
+	}
+	if strings.Contains(merged, "<<<<<<<") {
+		t.Fatalf("unexpected conflict markers:\n%s", merged)
+	}
+	// The shared, unchanged Alpha appears exactly once.
+	if strings.Count(merged, "func Alpha()") != 1 {
+		t.Fatalf("Alpha should appear once, got:\n%s", merged)
+	}
+}
+
+// TestChunkMergeSameChunkConflicts is the correctness guard: when both sides
+// edit the *same* chunk differently, the chunk merge must NOT dissolve it — the
+// file-level merge still reports a conflict.
+func TestChunkMergeSameChunkConflicts(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc Alpha() int {\n\treturn 1\n}\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", "package main\n\nfunc Alpha() int {\n\treturn 100\n}\n")
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "A", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", "package main\n\nfunc Alpha() int {\n\treturn 999\n}\n")
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "B", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("same-chunk divergent edits must conflict, got clean merge: %q", out)
+	}
+	// And the strategy flag can still resolve it.
+	if code, _, errs := runCLI(t, "merge", "--ours", "featA"); code != 0 {
+		t.Fatalf("merge --ours should resolve: %s", errs)
+	}
+	runCLI(t, "extract", "out")
+	if got := readFile(t, "out/m.go"); !strings.Contains(got, "return 999") {
+		t.Fatalf("--ours should keep our body (999), got:\n%s", got)
+	}
+}
