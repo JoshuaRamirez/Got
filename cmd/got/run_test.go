@@ -1414,3 +1414,64 @@ func TestChunkMergeSameChunkConflicts(t *testing.T) {
 		t.Fatalf("--ours should keep our body (999), got:\n%s", got)
 	}
 }
+
+// --- Go-aware chunk merge + structural-validity gate (UC-U37) ---
+
+// setupGoMerge builds base/featA/featB where each branch adds a top-level
+// declaration, and returns after leaving HEAD on featB ready to `merge featA`.
+func setupGoMerge(t *testing.T, base, addA, addB string) {
+	t.Helper()
+	initRepoInDir(t)
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", base+addA)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "A", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", base+addB)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "B", "--actor", "t")
+}
+
+// Control: two branches add distinct top-level funcs → the Go chunker merges
+// them cleanly and both survive (valid Go).
+func TestGoChunkMergeDistinctDecls(t *testing.T) {
+	base := "package main\n\nfunc Alpha() int {\n\treturn 1\n}\n"
+	setupGoMerge(t, base,
+		"\nfunc Size() int {\n\treturn 42\n}\n",
+		"\nfunc Weight() int {\n\treturn 7\n}\n")
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("distinct decls should merge cleanly: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	merged := readFile(t, "out/m.go")
+	if !strings.Contains(merged, "func Size()") || !strings.Contains(merged, "func Weight()") {
+		t.Fatalf("both decls should survive:\n%s", merged)
+	}
+	if !goValidityOK(merged) {
+		t.Fatalf("merged result should be valid Go:\n%s", merged)
+	}
+}
+
+// Gate: same structure as the control, but the two added decls collide on the
+// symbol `Size` (a func and a var). The chunk merge is clean (distinct keys),
+// but the structural-validity gate refuses to auto-produce the invalid result —
+// which git would merge silently. The merge therefore conflicts instead.
+func TestGoChunkMergeValidityGate(t *testing.T) {
+	base := "package main\n\nfunc Alpha() int {\n\treturn 1\n}\n"
+	setupGoMerge(t, base,
+		"\nfunc Size() int {\n\treturn 42\n}\n",
+		"\nvar Size = 0\n")
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("colliding Size must not auto-merge into invalid Go, got clean: %q", out)
+	}
+	// The strategy flag still lets the developer choose a side deliberately.
+	if code, _, errs := runCLI(t, "merge", "--ours", "featA"); code != 0 {
+		t.Fatalf("merge --ours should resolve: %s", errs)
+	}
+}

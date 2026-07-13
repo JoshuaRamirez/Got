@@ -52,7 +52,7 @@ go build -o got ./cmd/got
 ./got commit -m "add art" --actor you   # record current state as a commit
 ./got status              # current branch + uncommitted changes
 ./got checkout -b feature # create + switch branch (working tree follows HEAD)
-./got merge feature       # semantic three-way merge; same-file disjoint edits reconcile at chunk level
+./got merge feature       # semantic merge; Go files reconcile per-declaration and refuse invalid results
 ./got merge feature --ours # on conflict, keep our side per node/edge (--theirs takes theirs)
 ./got tag v1 ; ./got show v1 ; ./got revert v1   # name / inspect / undo a commit
 ./got blame report        # which commit introduced / last changed a node (per-node, not per-line)

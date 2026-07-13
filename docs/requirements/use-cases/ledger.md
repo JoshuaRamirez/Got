@@ -84,6 +84,7 @@ When a UC is retired:
 | [UC-U34](user/UC-U34-bisect.md) | Bisect history to find the first bad commit | Verified | `cmd/got/bisect.go` (`cmdBisect` + suspect-set / candidate-pick), `cmd/got` (`bisect`) | `cmd/got/run_test.go` | 2026-06-16 | Binary search over the DAG suspect set (ancestors(bad) \ ancestors(good) \ {bad}). `start <bad> <good>` (validates ancestry), `good`/`bad` verdicts narrow and check out the next optimal candidate to the working graph (detached — no ref moves), `run <cmd>` automates (exit 0 good / non-zero bad), `reset` restores the origin branch, `status` reports the boundary. Tests: manual convergence to c3 in a linear c0..c5 with reset, ancestry/unknown-ref validation, verdict-without-session, idle status. |
 | [UC-U35](user/UC-U35-version-files.md) | Version real files through the graph | Verified | `cmd/got/files.go` (`add`/`extract`), `internal/history/history.go` (`computeID` content digest) | `cmd/got/run_test.go`, `internal/history/history_test.go` | 2026-06-16 | `add <path>...` ingests real files/dirs as Artifact vertices named by path (bytes base64 under `file.content`, perms under `file.mode`); `extract [<dir>]` renders file vertices back to disk. Commit/branch/merge version them for free. computeID now folds each element's content digest so an in-place edit at the same path is a distinct commit (was: bare-id hash → collision → `Log.Add` silently dropped the second). Tests: full round-trip on real source (branch/edit/extract byte-match + branch revert), disjoint-file merge, same-message-diff-content distinct ids, path-traversal safety; history unit test for attr-sensitive ids. |
 | [UC-U36](user/UC-U36-chunk-merge.md) | Merge a file at chunk granularity | Verified | `cmd/got/chunk.go` (block chunker), `cmd/got/chunkmerge.go` (`reconcileFilesByChunk` over `repo.MergeStates`) | `cmd/got/chunk_test.go`, `cmd/got/run_test.go` | 2026-06-16 | Pre-pass before file-level merge: decomposes each both-sides-changed file into signature-keyed top-level blocks and runs them through the same graph three-way engine at chunk granularity; clean → rewrites both sides to the merged file, dissolving the conflict. Verified head-to-head vs git: two branches adding a new function at the same location (git conflicts) merge cleanly keeping both; correctness guard: same-chunk divergent edits still conflict (resolvable via --ours/--theirs). Honest limits (in UC): parser-free block tier, insertion-ordering heuristic. Tests: Split/Join round-trip, key stability across body edits, distinct/duplicate keys, same-location-adds clean merge, same-chunk conflict. |
+| [UC-U37](user/UC-U37-go-chunk-merge.md) | Merge Go files by declaration, refuse invalid results | Verified | `cmd/got/gochunk.go` (`goChunker` AST chunker + `goValidityOK` gate), `cmd/got/chunkmerge.go` (`chunkerFor`/`mergedIsValid`) | `cmd/got/gochunk_test.go`, `cmd/got/run_test.go` | 2026-06-16 | `.go` files chunk at top-level declaration boundaries keyed by symbol (byte-spliced, so Split→Join is verbatim; parse error → block-chunker fallback). Structural-validity gate parses the merged result and refuses it if a top-level symbol is declared twice. Verified head-to-head vs git: A adds `func Size`, B adds `var Size` at a different location — git merges CLEAN into code that does not compile (`Size redeclared`), Got refuses via the gate; control with distinct names merges cleanly, isolating the gate. Tests: Split/Join round-trip incl. parse-error fallback, symbol-key stability across body edit, gate (dup func, func/var collision, same-name methods on different types OK, unparseable), CLI distinct-decls-clean + collision-refused. |
 
 ## System use cases
 
@@ -123,11 +124,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 36 | 0 | 36 |
+| User | 0 | 0 | 0 | 37 | 0 | 37 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **63** | **0** | **63** |
+| **Total** | **0** | **0** | **0** | **64** | **0** | **64** |
 
-**Verified coverage: 63 / 63 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 64 / 64 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added

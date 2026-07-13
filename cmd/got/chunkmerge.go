@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"strings"
 
 	"github.com/joshuaramirez/got/internal/graph"
 	"github.com/joshuaramirez/got/internal/ontology"
@@ -75,7 +76,7 @@ func reconcileFilesByChunk(base, left, right graph.Snapshot) (graph.Snapshot, gr
 // false when the engine reports a chunk-level conflict (both sides changed the
 // same chunk differently).
 func chunkMerge(path, base, left, right string) (string, bool) {
-	ch := newBlockChunker()
+	ch := chunkerFor(path)
 	bC, lC, rC := ch.Split(base), ch.Split(left), ch.Split(right)
 
 	merged, mr, err := newService().MergeStates(
@@ -119,7 +120,35 @@ func chunkMerge(path, base, left, right string) (string, bool) {
 	for _, c := range rC {
 		emit(c.Key)
 	}
-	return ch.Join(ordered), true
+	mergedContent := ch.Join(ordered)
+
+	// Structural-validity gate: refuse to auto-produce a merged file that is not
+	// structurally sound (e.g. two funcs cleanly merged from different chunks
+	// that collide at package scope). Refusing here leaves the file for the
+	// file-level merge to flag, so the developer resolves it rather than
+	// committing invalid code — a check git cannot make.
+	if !mergedIsValid(path, mergedContent) {
+		return "", false
+	}
+	return mergedContent, true
+}
+
+// chunkerFor selects the language-aware chunker for a path, falling back to the
+// language-agnostic block chunker.
+func chunkerFor(path string) chunker {
+	if strings.HasSuffix(path, ".go") {
+		return newGoChunker()
+	}
+	return newBlockChunker()
+}
+
+// mergedIsValid runs the language-specific validity gate for a path. Non-Go
+// files have no gate (any text is "valid"), so they pass.
+func mergedIsValid(path, content string) bool {
+	if strings.HasSuffix(path, ".go") {
+		return goValidityOK(content)
+	}
+	return true
 }
 
 // chunkSnapshot builds a throwaway snapshot of one Artifact vertex per chunk,
