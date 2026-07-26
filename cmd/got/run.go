@@ -1265,6 +1265,16 @@ func cmdMerge(args []string, stdout, stderr io.Writer) int {
 			}
 			return 1
 		}
+
+		// Semantic gate (default path only; --ours/--theirs is an explicit
+		// override the user has chosen). Refuse a merge whose merged package no
+		// longer type-checks — a cross-file redeclaration or a reference to a
+		// symbol the other branch deleted — which git would commit silently.
+		if okSem, detail := semanticGateOK(mergedGraph, baseSnap); !okSem {
+			fmt.Fprintf(stdout, "merge aborted: merged result does not type-check (use --ours or --theirs to override)\n")
+			fmt.Fprintf(stdout, "  %s\n", detail)
+			return 1
+		}
 	}
 
 	mergedState := repo.NewState(mergedGraph, state.Namespace())

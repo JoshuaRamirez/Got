@@ -1576,3 +1576,77 @@ func TestGoChunkMergeImportNameCollision(t *testing.T) {
 		t.Fatalf("import-name vs var collision must be refused, got clean: %q", out)
 	}
 }
+
+// --- whole-package semantic gate via go/types (UC-U40) ---
+
+// Cross-file redeclaration: base defines Foo in a.go; one branch adds b.go that
+// also defines Foo. The per-file structural gate cannot see it (each file is
+// fine alone); the semantic gate type-checks the package and refuses. git merges
+// this silently (separate files, no textual conflict).
+func TestSemanticGateCrossFileRedecl(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "a.go", "package main\n\nfunc Foo() int { return 1 }\n")
+	runCLI(t, "add", "a.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "b.go", "package main\n\nfunc Foo() int { return 2 }\n")
+	runCLI(t, "add", "b.go")
+	runCLI(t, "commit", "-m", "dup Foo in b", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "c.go", "package main\n\nfunc Bar() int { return 3 }\n")
+	runCLI(t, "add", "c.go")
+	runCLI(t, "commit", "-m", "add Bar", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("cross-file duplicate Foo must be refused, got clean: %q", out)
+	}
+	// --ours is the explicit override and bypasses the semantic gate.
+	if code, _, errs := runCLI(t, "merge", "--ours", "featA"); code != 0 {
+		t.Fatalf("--ours should override the semantic gate: %s", errs)
+	}
+}
+
+// Dangling reference: one branch removes helper(); another adds a file that
+// calls it. The merged package has an undefined name; the gate refuses.
+func TestSemanticGateDanglingRef(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "a.go", "package main\n\nfunc helper() int { return 7 }\n\nfunc A() int { return helper() }\n")
+	runCLI(t, "add", "a.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "a.go", "package main\n\nfunc A() int { return 0 }\n")
+	runCLI(t, "add", "a.go")
+	runCLI(t, "commit", "-m", "remove helper", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "b.go", "package main\n\nfunc B() int { return helper() + 1 }\n")
+	runCLI(t, "add", "b.go")
+	runCLI(t, "commit", "-m", "use helper in b", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("reference to deleted helper must be refused, got clean: %q", out)
+	}
+}
+
+// The gate must not refuse a merge whose only type errors come from an import it
+// cannot resolve (the sandbox lacks external/internal deps).
+func TestSemanticGateToleratesUnresolvedImport(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "m.go", "package main\n\nfunc A() int { return 1 }\n")
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "x.go", "package main\n\nimport \"github.com/nope/pkg\"\n\nfunc useIt() { pkg.Do() }\n")
+	runCLI(t, "add", "x.go")
+	runCLI(t, "commit", "-m", "add x", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "y.go", "package main\n\nfunc B() int { return 2 }\n")
+	runCLI(t, "add", "y.go")
+	runCLI(t, "commit", "-m", "add y", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("unresolved import must be tolerated, got refusal: out=%q err=%q", out, errs)
+	}
+}
