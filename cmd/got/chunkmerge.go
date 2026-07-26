@@ -72,9 +72,12 @@ func reconcileFilesByChunk(base, left, right graph.Snapshot) (graph.Snapshot, gr
 }
 
 // chunkMerge decomposes base/left/right into chunks, merges them through the
-// graph three-way engine, and reassembles the merged file. It returns ok ==
-// false when the engine reports a chunk-level conflict (both sides changed the
-// same chunk differently).
+// graph three-way engine, reassembles the merged file, and validity-gates it.
+// It returns ok == false in any of three cases: the engine reports a chunk-level
+// content conflict (both sides changed the same chunk differently); the chunk
+// order cannot be three-way merged (both sides reordered incompatibly); or the
+// reassembled file fails the structural-validity gate. In every such case the
+// file is left for the file-level merge to flag.
 func chunkMerge(path, base, left, right string) (string, bool) {
 	ch := chunkerFor(path)
 	bC, lC, rC := ch.Split(base), ch.Split(left), ch.Split(right)
@@ -98,27 +101,19 @@ func chunkMerge(path, base, left, right string) (string, bool) {
 		body[k] = c
 	}
 
-	// Reassemble in base order, then any chunks added by a side (base first
-	// keeps unchanged files verbatim; the clean disjoint-edit case is exact).
-	var ordered []chunk
-	emitted := make(map[string]bool)
-	emit := func(k string) {
-		if emitted[k] {
-			return
-		}
-		if c, ok := body[k]; ok {
-			ordered = append(ordered, chunk{Key: k, Content: c})
-			emitted[k] = true
-		}
+	// Reassemble. The *content* of each surviving chunk comes from the graph
+	// merge (body); the *order* is a separate three-way merge of the chunk key
+	// sequences, recomputed here from the ordered Split slices. Order is never
+	// stored on a chunk vertex: repo.MergeStates compares whole attribute maps,
+	// so an order attribute would turn an independent reorder into a false
+	// content conflict.
+	seq, ok := mergeChunkOrder(bC, lC, rC, body)
+	if !ok {
+		return "", false // incompatible two-sided reorder → leave to file-level merge
 	}
-	for _, c := range bC {
-		emit(c.Key)
-	}
-	for _, c := range lC {
-		emit(c.Key)
-	}
-	for _, c := range rC {
-		emit(c.Key)
+	ordered := make([]chunk, 0, len(seq))
+	for _, k := range seq {
+		ordered = append(ordered, chunk{Key: k, Content: body[k]})
 	}
 	mergedContent := ch.Join(ordered)
 
@@ -131,6 +126,117 @@ func chunkMerge(path, base, left, right string) (string, bool) {
 		return "", false
 	}
 	return mergedContent, true
+}
+
+// mergeChunkOrder three-way merges the *sequence* of chunk keys (independent of
+// their content, which the graph merge already reconciled into `body`). It
+// returns the merged key order over the surviving chunks, and ok == false only
+// when both sides reordered the shared chunks into different sequences.
+//
+// The rule: if neither side reordered the shared chunks, emit base order then
+// each side's additions (identical to the pre-order-merge behavior, so
+// disjoint-edit results are unchanged). If exactly one side reordered, that
+// side's full sequence is the authority (preserving both its reorder and the
+// placement of its own additions) and the other side's additions are appended.
+// If both reordered identically, accept; if differently, conflict.
+func mergeChunkOrder(base, left, right []chunk, body map[string]string) ([]string, bool) {
+	bKeys, lKeys, rKeys := keysOf(base), keysOf(left), keysOf(right)
+	baseSet := setOf(bKeys)
+
+	lReordered := sideReordered(bKeys, lKeys, baseSet)
+	rReordered := sideReordered(bKeys, rKeys, baseSet)
+
+	var authority []string
+	otherAdds := [][]string{}
+	switch {
+	case !lReordered && !rReordered:
+		authority, otherAdds = bKeys, [][]string{lKeys, rKeys}
+	case lReordered && !rReordered:
+		authority, otherAdds = lKeys, [][]string{rKeys}
+	case rReordered && !lReordered:
+		authority, otherAdds = rKeys, [][]string{lKeys}
+	default: // both reordered
+		if !equalSeq(commonOrder(lKeys, baseSet), commonOrder(rKeys, baseSet)) {
+			return nil, false
+		}
+		authority, otherAdds = lKeys, [][]string{rKeys}
+	}
+
+	var out []string
+	seen := make(map[string]bool)
+	push := func(k string) {
+		if seen[k] {
+			return
+		}
+		if _, alive := body[k]; !alive {
+			return // dropped by the content merge (deletion honored)
+		}
+		out = append(out, k)
+		seen[k] = true
+	}
+	for _, k := range authority {
+		push(k)
+	}
+	for _, seq := range otherAdds {
+		for _, k := range seq {
+			if !baseSet[k] {
+				push(k) // only that side's own additions; shared keys came from authority
+			}
+		}
+	}
+	return out, true
+}
+
+// sideReordered reports whether a side changed the relative order of the chunks
+// it shares with the base (additions and deletions do not count as reorder).
+func sideReordered(bKeys, sideKeys []string, baseSet map[string]bool) bool {
+	sideSet := setOf(sideKeys)
+	var baseCommon []string
+	for _, k := range bKeys {
+		if sideSet[k] {
+			baseCommon = append(baseCommon, k)
+		}
+	}
+	return !equalSeq(baseCommon, commonOrder(sideKeys, baseSet))
+}
+
+// commonOrder is the subsequence of keys that are present in the base set.
+func commonOrder(keys []string, baseSet map[string]bool) []string {
+	var out []string
+	for _, k := range keys {
+		if baseSet[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func keysOf(chunks []chunk) []string {
+	out := make([]string, len(chunks))
+	for i, c := range chunks {
+		out[i] = c.Key
+	}
+	return out
+}
+
+func setOf(keys []string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[k] = true
+	}
+	return m
+}
+
+func equalSeq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // chunkerFor selects the language-aware chunker for a path, falling back to the

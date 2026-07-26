@@ -1475,3 +1475,42 @@ func TestGoChunkMergeValidityGate(t *testing.T) {
 		t.Fatalf("merge --ours should resolve: %s", errs)
 	}
 }
+
+// --- order-aware chunk merge (UC-U38): reorder preserved, not silently dropped ---
+
+// TestGoChunkMergeReorderPreserved: one branch reorders top-level decls (swap
+// B/C) while the other edits an unaffected decl (A). The merge preserves the
+// reorder AND applies the edit — where the pre-order-merge reassembly silently
+// dropped the reorder (base order won).
+func TestGoChunkMergeReorderPreserved(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc A() int {\n\treturn 1\n}\n\nfunc B() int {\n\treturn 2\n}\n\nfunc C() int {\n\treturn 3\n}\n"
+	ours := "package main\n\nfunc A() int {\n\treturn 1\n}\n\nfunc C() int {\n\treturn 3\n}\n\nfunc B() int {\n\treturn 2\n}\n"
+	theirs := "package main\n\nfunc A() int {\n\treturn 100\n}\n\nfunc B() int {\n\treturn 2\n}\n\nfunc C() int {\n\treturn 3\n}\n"
+
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", theirs)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "edit A", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", ours)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "swap B and C", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("reorder + disjoint edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	merged := readFile(t, "out/m.go")
+	if !strings.Contains(merged, "return 100") {
+		t.Fatalf("A's edit lost:\n%s", merged)
+	}
+	// The reorder (C before B) is preserved.
+	if strings.Index(merged, "func C()") > strings.Index(merged, "func B()") {
+		t.Fatalf("reorder not preserved (C should precede B):\n%s", merged)
+	}
+}
