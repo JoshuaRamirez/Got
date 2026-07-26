@@ -17,8 +17,10 @@ import (
 //
 //   - Body-edit and reformat immunity: a chunk's identity is its symbol, so
 //     editing or reindenting a function's body keeps it aligned across a merge.
-//   - Rename alignment: a declaration is the same chunk wherever it moves in the
-//     file, because position is not part of its key.
+//   - Move alignment: a declaration is the same chunk wherever it moves in the
+//     file, because position is not part of its key. (A *rename* changes the
+//     symbol and therefore the key, so it does not align — it looks like a
+//     delete plus an add; rename detection is not attempted.)
 //
 // Content is spliced from the original source bytes at declaration offsets — it
 // is never reprinted — so Split→Join reproduces the file verbatim (unlike
