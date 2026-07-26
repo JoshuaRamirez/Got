@@ -46,6 +46,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U37](user/UC-U37-go-chunk-merge.md) | Merge Go files by declaration, refuse invalid results | Developer | `cmd/got` |
 | [UC-U38](user/UC-U38-chunk-order-merge.md) | Preserve chunk order across a merge | Developer | `cmd/got` |
 | [UC-U39](user/UC-U39-import-merge.md) | Merge Go imports as a set, gate on import names | Developer | `cmd/got` |
+| [UC-U40](user/UC-U40-semantic-merge-gate.md) | Refuse a merge that does not type-check | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 

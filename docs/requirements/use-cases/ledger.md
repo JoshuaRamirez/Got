@@ -87,6 +87,7 @@ When a UC is retired:
 | [UC-U37](user/UC-U37-go-chunk-merge.md) | Merge Go files by declaration, refuse invalid results | Verified | `cmd/got/gochunk.go` (`goChunker` AST chunker + `goValidityOK` gate), `cmd/got/chunkmerge.go` (`chunkerFor`/`mergedIsValid`) | `cmd/got/gochunk_test.go`, `cmd/got/run_test.go` | 2026-06-16 | `.go` files chunk at top-level declaration boundaries keyed by symbol (byte-spliced, so Split→Join is verbatim; parse error → block-chunker fallback). Structural-validity gate parses the merged result and refuses it if a top-level symbol is declared twice. Verified head-to-head vs git: A adds `func Size`, B adds `var Size` at a different location — git merges CLEAN into code that does not compile (`Size redeclared`), Got refuses via the gate; control with distinct names merges cleanly, isolating the gate. Tests: Split/Join round-trip incl. parse-error fallback, symbol-key stability across body edit, gate (dup func, func/var collision, same-name methods on different types OK, unparseable), CLI distinct-decls-clean + collision-refused. |
 | [UC-U38](user/UC-U38-chunk-order-merge.md) | Preserve chunk order across a merge | Verified | `cmd/got/chunkmerge.go` (`mergeChunkOrder` + order-aware reassembly) | `cmd/got/chunkmerge_test.go`, `cmd/got/run_test.go` | 2026-07-26 | Fixes review P1 (one-sided reorder silently dropped). Chunk *order* is a separate three-way merge of the key sequence recomputed from the ordered Split slices — never a vertex attr (that would break `vertexContentEqual`). Neither reordered → base order + adds (unchanged behavior); one side reordered → its sequence is authority; both incompatibly → conflict. Tests: unit `mergeChunkOrder` (no-reorder identity, one-sided authority, reorder+add, incompatible→conflict, identical→accept, deletion drops out); CLI reorder+disjoint-edit preserved. Honest limit (in UC): Go chunker trailing-separator coupling surfaces some last-position moves as conflicts (never silent). |
 | [UC-U39](user/UC-U39-import-merge.md) | Merge Go imports as a set, gate on import names | Verified | `cmd/got/gochunk.go` (import decomposition in `Split`, `importLocalNames`, `topLevelNames` IMPORT), `cmd/got/chunkmerge.go` (`groupImportChunks`) | `cmd/got/gochunk_test.go`, `cmd/got/run_test.go` | 2026-07-26 | Fixes review P1 (import names absent from gate). Parenthesized import blocks decompose into head/per-spec/tail chunks so distinct added imports union via the graph engine (git conflicts; verified head-to-head Got merges clean, all imports present, valid). `groupImportChunks` keeps specs inside the parens on reassembly. Gate now includes import-bound names (alias or path.Base; `_`/`.` skipped) so `import "fmt"` vs `var fmt` and duplicate imports are refused. Tests: import Split/Join round-trip (grouped/aliased/blank/dot/empty/single-line/doc), gate collisions, CLI union + collision-refused. Honest limit: path.Base name heuristic (go/types gate supersedes). |
+| [UC-U40](user/UC-U40-semantic-merge-gate.md) | Refuse a merge that does not type-check | Verified | `cmd/got/gotypes.go` (`semanticGateOK`/`typeCheckPackage`), `cmd/got/run.go` (merge hook) | `cmd/got/run_test.go` | 2026-07-26 | Default `merge` type-checks the merged package(s) touched by the merge with go/types and refuses on an in-package redeclaration or undefined name — catches cross-file symbol dup and dangling references the per-file structural gate cannot see (git commits both silently; verified head-to-head). Tolerates parse errors, unresolvable imports (sandbox lacks internal/external deps), and unused-import warnings — a within-package net, not a whole-program build. `--ours`/`--theirs` bypasses it (explicit override). Tests: cross-file redecl refused + --ours override, dangling-ref refused, unresolved-import tolerated. |
 
 ## System use cases
 
@@ -126,11 +127,11 @@ As of 2026-06-16:
 
 | Layer | Specified | Partial | Implemented | Verified | Retired | Total |
 |---|---:|---:|---:|---:|---:|---:|
-| User | 0 | 0 | 0 | 39 | 0 | 39 |
+| User | 0 | 0 | 0 | 40 | 0 | 40 |
 | System | 0 | 0 | 0 | 27 | 0 | 27 |
-| **Total** | **0** | **0** | **0** | **66** | **0** | **66** |
+| **Total** | **0** | **0** | **0** | **67** | **0** | **67** |
 
-**Verified coverage: 66 / 66 = 100%.** UC-U18 (three-way merge) and
+**Verified coverage: 67 / 67 = 100%.** UC-U18 (three-way merge) and
 UC-U19 (`cmd/got` shell) added 2026-06-10; UC-S21 (frontier audit /
 Strict-on-Release), UC-S22 (durable `FileStore` namespace), UC-S23
 (graph snapshot codec), and UC-U20 (repository persist/reload) added
