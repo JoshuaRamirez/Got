@@ -102,3 +102,21 @@ func TestGoValidityGateImports(t *testing.T) {
 		t.Fatal("blank import binds no name; should not collide")
 	}
 }
+
+// Statement-level sub-chunking must keep Split→Join verbatim for varied bodies.
+func TestGoChunkerSubFuncRoundTrip(t *testing.T) {
+	ch := newGoChunker()
+	cases := []string{
+		"package p\n\nfunc F() {\n}\n",
+		"package p\n\nfunc F() int {\n\ta := 1\n\treturn a\n}\n",
+		"package p\n\nfunc F() {\n\t// comment\n\tx := 1\n\n\ty := 2\n}\n",
+		"package p\n\nfunc F() {\n\tif true {\n\t\tg()\n\t}\n\tfor i := 0; i < 3; i++ {\n\t\th(i)\n\t}\n}\n",
+		"package p\n\nfunc F() {\n\tcb := func() { inner() }\n\tcb()\n}\n",
+		"package p\n\nfunc F() {} // one-liner\n\nfunc G() { a(); b() }\n",
+	}
+	for _, in := range cases {
+		if got := ch.Join(ch.Split(in)); got != in {
+			t.Fatalf("sub-func round-trip mismatch:\n in=%q\nout=%q", in, got)
+		}
+	}
+}

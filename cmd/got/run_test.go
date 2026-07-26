@@ -1650,3 +1650,68 @@ func TestSemanticGateToleratesUnresolvedImport(t *testing.T) {
 		t.Fatalf("unresolved import must be tolerated, got refusal: out=%q err=%q", out, errs)
 	}
 }
+
+// --- intra-function (statement-level) chunk merge (UC-U41) ---
+
+// Two branches edit different statements of the SAME function. git merges this
+// (disjoint lines); Got previously conflicted (whole function was one chunk) and
+// now merges it too, order preserved.
+func TestIntraFunctionDisjointEdits(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc Big() int {\n\ta := 1\n\tb := 2\n\tc := 3\n\treturn a + b + c\n}\n"
+	a := "package main\n\nfunc Big() int {\n\ta := 100\n\tb := 2\n\tc := 3\n\treturn a + b + c\n}\n"
+	b := "package main\n\nfunc Big() int {\n\ta := 1\n\tb := 2\n\tc := 300\n\treturn a + b + c\n}\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", a)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", b)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "edit c", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("disjoint intra-function edits should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	m := readFile(t, "out/m.go")
+	if !strings.Contains(m, "a := 100") || !strings.Contains(m, "c := 300") {
+		t.Fatalf("both statement edits should survive:\n%s", m)
+	}
+	if !goValidityOK(m) {
+		t.Fatalf("merged function should be valid:\n%s", m)
+	}
+	// Statement order preserved (a before c).
+	if strings.Index(m, "a := 100") > strings.Index(m, "c := 300") {
+		t.Fatalf("statement order not preserved:\n%s", m)
+	}
+}
+
+// Both sides edit the SAME statement differently → still a conflict (guard
+// against over-merging).
+func TestIntraFunctionSameStatementConflicts(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc Big() int {\n\ta := 1\n\treturn a\n}\n"
+	a := "package main\n\nfunc Big() int {\n\ta := 100\n\treturn a\n}\n"
+	b := "package main\n\nfunc Big() int {\n\ta := 999\n\treturn a\n}\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", a)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "a", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", b)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "b", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("same-statement divergent edits must conflict, got clean: %q", out)
+	}
+}
