@@ -5,7 +5,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +49,33 @@ func (goChunker) Split(content string) []chunk {
 	}
 	var cuts []cut
 	for _, d := range f.Decls {
+		// A parenthesized import block is decomposed into head "import (",
+		// one chunk per spec, and tail ")", so two branches adding different
+		// imports become independent chunk additions that the graph engine
+		// unions instead of conflicting on the whole block.
+		if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.IMPORT && g.Lparen.IsValid() {
+			head := d.Pos()
+			if g.Doc != nil {
+				head = g.Doc.Pos()
+			}
+			cuts = append(cuts, cut{off: fset.Position(head).Offset, key: "import.head"})
+			for _, s := range g.Specs {
+				is := s.(*ast.ImportSpec)
+				at := is.Pos()
+				if is.Doc != nil {
+					at = is.Doc.Pos()
+				}
+				cuts = append(cuts, cut{
+					off: lineStartOffset(src, fset.Position(at).Offset),
+					key: "import:" + importPath(is),
+				})
+			}
+			cuts = append(cuts, cut{
+				off: lineStartOffset(src, fset.Position(g.Rparen).Offset),
+				key: "import.tail",
+			})
+			continue
+		}
 		start := d.Pos()
 		if doc := declDoc(d); doc != nil {
 			start = doc.Pos()
@@ -110,6 +139,13 @@ func declKey(d ast.Decl) string {
 	case *ast.GenDecl:
 		switch x.Tok {
 		case token.IMPORT:
+			// Only reached for a non-parenthesized single import (the
+			// parenthesized case is expanded in Split). Key by its path.
+			for _, s := range x.Specs {
+				if is, ok := s.(*ast.ImportSpec); ok {
+					return "import:" + importPath(is)
+				}
+			}
 			return "import"
 		case token.TYPE:
 			if n := firstTypeName(x); n != "" {
@@ -206,6 +242,54 @@ func goValidityOK(content string) bool {
 	return true
 }
 
+// importPath returns the unquoted import path of a spec (raw value on error).
+func importPath(is *ast.ImportSpec) string {
+	if p, err := strconv.Unquote(is.Path.Value); err == nil {
+		return p
+	}
+	return strings.Trim(is.Path.Value, `"`)
+}
+
+// importLocalNames returns the file-scope names an import declaration binds:
+// the explicit alias when present, otherwise the package-name heuristic
+// (path.Base). Blank ("_") and dot (".") imports bind no checkable name and are
+// skipped. These names participate in the validity gate because an import name
+// shares the file block with package-scope declarations — e.g. `import "fmt"`
+// collides with `var fmt = 1`.
+func importLocalNames(g *ast.GenDecl) []string {
+	var out []string
+	for _, s := range g.Specs {
+		is, ok := s.(*ast.ImportSpec)
+		if !ok {
+			continue
+		}
+		if is.Name != nil {
+			if n := is.Name.Name; n != "_" && n != "." {
+				out = append(out, n)
+			}
+			continue
+		}
+		// No alias: the bound name is the package's own name. path.Base is a
+		// heuristic (usually correct; e.g. gopkg.in/yaml.v2 → "yaml.v2" is
+		// wrong) — the go/types gate (UC-U40) reads the real package name.
+		out = append(out, path.Base(importPath(is)))
+	}
+	return out
+}
+
+// lineStartOffset returns the offset of the start of the line containing off,
+// so a chunk boundary at a spec captures that spec's leading indentation.
+func lineStartOffset(src string, off int) int {
+	if off > len(src) {
+		off = len(src)
+	}
+	i := off
+	for i > 0 && src[i-1] != '\n' {
+		i--
+	}
+	return i
+}
+
 // topLevelNames returns the package-scope identifiers a declaration introduces.
 // Methods are namespaced by receiver type, since distinct types may share a
 // method name without colliding.
@@ -218,7 +302,7 @@ func topLevelNames(d ast.Decl) []string {
 		return []string{x.Name.Name}
 	case *ast.GenDecl:
 		if x.Tok == token.IMPORT {
-			return nil
+			return importLocalNames(x)
 		}
 		var out []string
 		for _, s := range x.Specs {

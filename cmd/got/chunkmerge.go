@@ -111,6 +111,12 @@ func chunkMerge(path, base, left, right string) (string, bool) {
 	if !ok {
 		return "", false // incompatible two-sided reorder → leave to file-level merge
 	}
+	if strings.HasSuffix(path, ".go") {
+		// Keep decomposed import chunks contiguous and correctly bracketed:
+		// generic ordering would append a newly-added spec after the block's
+		// tail (outside the parens). Regroup them as head, specs, tail.
+		seq = groupImportChunks(seq)
+	}
 	ordered := make([]chunk, 0, len(seq))
 	for _, k := range seq {
 		ordered = append(ordered, chunk{Key: k, Content: body[k]})
@@ -237,6 +243,51 @@ func equalSeq(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// groupImportChunks relocates decomposed import chunks (keys "import.head",
+// "import:<path>", "import.tail") into one contiguous, correctly-ordered block
+// — head(s), then specs, then tail(s) — positioned where the first import chunk
+// appeared. Without this, an import spec added on one side (an "addition") would
+// be appended by the generic reassembly after the block's closing paren,
+// producing unparseable Go. Multiple import blocks (rare) collapse into one.
+func groupImportChunks(seq []string) []string {
+	firstAt := -1
+	var heads, specs, tails, rest []string
+	for _, k := range seq {
+		switch {
+		case strings.HasPrefix(k, "import.head"):
+			if firstAt < 0 {
+				firstAt = len(rest)
+			}
+			heads = append(heads, k)
+		case strings.HasPrefix(k, "import.tail"):
+			if firstAt < 0 {
+				firstAt = len(rest)
+			}
+			tails = append(tails, k)
+		case strings.HasPrefix(k, "import:"):
+			if firstAt < 0 {
+				firstAt = len(rest)
+			}
+			specs = append(specs, k)
+		default:
+			rest = append(rest, k)
+		}
+	}
+	if firstAt < 0 {
+		return seq // no import chunks
+	}
+	group := make([]string, 0, len(heads)+len(specs)+len(tails))
+	group = append(group, heads...)
+	group = append(group, specs...)
+	group = append(group, tails...)
+
+	out := make([]string, 0, len(seq))
+	out = append(out, rest[:firstAt]...)
+	out = append(out, group...)
+	out = append(out, rest[firstAt:]...)
+	return out
 }
 
 // chunkerFor selects the language-aware chunker for a path, falling back to the
