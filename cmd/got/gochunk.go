@@ -80,7 +80,27 @@ func (goChunker) Split(content string) []chunk {
 		if doc := declDoc(d); doc != nil {
 			start = doc.Pos()
 		}
-		cuts = append(cuts, cut{off: fset.Position(start).Offset, key: declKey(d)})
+		key := declKey(d)
+		cuts = append(cuts, cut{off: fset.Position(start).Offset, key: key})
+
+		// Recurse one level into a function body: emit a sub-chunk per top-level
+		// statement (positionally keyed under the function) plus a tail for the
+		// closing brace, so two branches editing *different* statements of the
+		// same function merge — the case a whole-function chunk conflicts on.
+		// Positional keys make an edit a modification (stable key), not a
+		// delete+add; a statement insert/delete shifts the alignment and tends
+		// to surface as a conflict (never a silent scramble — the go/types gate
+		// UC-U40 backstops any result that would not type-check).
+		if fn, ok := d.(*ast.FuncDecl); ok && fn.Body != nil && len(fn.Body.List) > 0 {
+			for i, stmt := range fn.Body.List {
+				at := lineStartOffset(src, fset.Position(stmt.Pos()).Offset)
+				cuts = append(cuts, cut{off: at, key: fmt.Sprintf("%s\x1f%d", key, i)})
+			}
+			cuts = append(cuts, cut{
+				off: lineStartOffset(src, fset.Position(fn.Body.Rbrace).Offset),
+				key: key + "\x1ftail",
+			})
+		}
 	}
 	sort.SliceStable(cuts, func(i, j int) bool { return cuts[i].off < cuts[j].off })
 
