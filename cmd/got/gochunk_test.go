@@ -64,3 +64,41 @@ func TestGoValidityGate(t *testing.T) {
 		t.Fatal("unparseable file must fail the gate")
 	}
 }
+
+// Byte-fidelity is the sharp risk for import decomposition: Split→Join must be
+// verbatim for every import shape, or the tiling silently drops/dupes bytes.
+func TestGoChunkerImportRoundTrip(t *testing.T) {
+	ch := newGoChunker()
+	cases := []string{
+		"package p\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc F() {}\n",
+		"package p\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/x/y\" // c\n)\n",
+		"package p\n\nimport (\n\tf \"fmt\"\n\t_ \"embed\"\n\t. \"errors\"\n)\n",
+		"package p\n\nimport ()\n\nfunc F() {}\n",
+		"package p\n\nimport \"fmt\"\n\nfunc F() { _ = fmt.Sprint }\n",
+		"package p\n\n// leading doc\nimport (\n\t// grouped\n\t\"a/b\"\n)\n",
+	}
+	for _, in := range cases {
+		if got := ch.Join(ch.Split(in)); got != in {
+			t.Fatalf("import round-trip mismatch:\n in=%q\nout=%q", in, got)
+		}
+	}
+}
+
+func TestGoValidityGateImports(t *testing.T) {
+	// import name collides with a package-scope var (the fixed P1).
+	if goValidityOK("package p\n\nimport \"fmt\"\n\nvar fmt = 1\n") {
+		t.Fatal("import name vs var must collide")
+	}
+	// duplicate import.
+	if goValidityOK("package p\n\nimport (\n\t\"fmt\"\n\t\"fmt\"\n)\n") {
+		t.Fatal("duplicate import must fail the gate")
+	}
+	// an alias avoids the collision.
+	if !goValidityOK("package p\n\nimport f \"fmt\"\n\nvar fmt = 1\n") {
+		t.Fatal("aliased import should not collide with var fmt")
+	}
+	// blank and dot imports bind no checkable name.
+	if !goValidityOK("package p\n\nimport _ \"embed\"\n\nvar embed = 1\n") {
+		t.Fatal("blank import binds no name; should not collide")
+	}
+}

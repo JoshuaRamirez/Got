@@ -1514,3 +1514,65 @@ func TestGoChunkMergeReorderPreserved(t *testing.T) {
 		t.Fatalf("reorder not preserved (C should precede B):\n%s", merged)
 	}
 }
+
+// --- import-aware chunk merge (UC-U39) ---
+
+// Two branches add different imports (each with a new user of it); main() is
+// untouched. Git conflicts on the import block; Got unions the imports.
+func TestGoChunkMergeImportUnion(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nimport (\n\t\"fmt\"\n)\n\nfunc main() { fmt.Println(\"hi\") }\n"
+	a := "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() { fmt.Println(\"hi\") }\n\nfunc useOS() int { return len(os.Args) }\n"
+	b := "package main\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nfunc main() { fmt.Println(\"hi\") }\n\nfunc useErr() error { return errors.New(\"x\") }\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", a)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "A", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", b)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "B", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("disjoint import additions should union cleanly: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	m := readFile(t, "out/m.go")
+	for _, want := range []string{`"os"`, `"errors"`, `"fmt"`, "useOS", "useErr"} {
+		if !strings.Contains(m, want) {
+			t.Fatalf("merged file missing %q:\n%s", want, m)
+		}
+	}
+	if !goValidityOK(m) {
+		t.Fatalf("merged import union should be valid Go:\n%s", m)
+	}
+}
+
+// The import-name gate P1: `import "fmt"` on one side and `var fmt` on the other
+// must be refused (previously passed, producing non-compiling Go).
+func TestGoChunkMergeImportNameCollision(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc A() int { return 1 }\n"
+	a := "package main\n\nimport \"fmt\"\n\nfunc A() int { fmt.Println(); return 1 }\n"
+	b := "package main\n\nvar fmt = 1\n\nfunc A() int { return fmt }\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", a)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "A", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", b)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "B", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("import-name vs var collision must be refused, got clean: %q", out)
+	}
+}
