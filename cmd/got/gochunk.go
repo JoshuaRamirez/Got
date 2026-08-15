@@ -85,8 +85,15 @@ func (goChunker) Split(content string) []chunk {
 			// The tail owns everything from the line after the last spec up to
 			// and including ")", so a comment or directive sitting before ")" has
 			// a single stable owner and is not duplicated when specs are added.
+			// Clamp to the ")" offset so that when the last spec's comment closes
+			// on the same line as ")", the tail still owns ")" (and the spec chunk
+			// keeps the whole comment) rather than swallowing ")".
+			tailOff := nextLineStart(src, fset.Position(lastSpecEnd).Offset)
+			if rp := fset.Position(g.Rparen).Offset; tailOff > rp {
+				tailOff = rp
+			}
 			cuts = append(cuts, cut{
-				off: nextLineStart(src, fset.Position(lastSpecEnd).Offset),
+				off: tailOff,
 				key: impBlockKey(b, "tail", ""),
 			})
 			continue

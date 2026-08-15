@@ -134,14 +134,45 @@ func typeCheckPackage(dir string, fset *token.FileSet, files []*ast.File) (bool,
 		}
 	}
 	for _, m := range msgs {
-		if strings.Contains(m, "undefined:") || strings.Contains(m, "undeclared name") {
-			if dotImportFailed {
-				continue // names injected by an unresolvable dot import; tolerate
-			}
-			return false, m
+		name, isUndef := undefinedName(m)
+		if !isUndef {
+			continue
 		}
+		// A dot import injects only *exported* names, so only an exported
+		// undefined name can be the cascade from an unresolved dot import; an
+		// unexported one (e.g. missingHelper) is a genuine hazard regardless.
+		if dotImportFailed && token.IsExported(name) {
+			continue
+		}
+		return false, m
 	}
 	return true, ""
+}
+
+// undefinedName extracts the identifier from a go/types "undefined: X" or
+// "undeclared name: X" error message.
+func undefinedName(msg string) (string, bool) {
+	for _, pfx := range []string{"undefined: ", "undeclared name: ", "undeclared name "} {
+		if i := strings.Index(msg, pfx); i >= 0 {
+			rest := msg[i+len(pfx):]
+			j := 0
+			for j < len(rest) && isIdentChar(rest[j]) {
+				j++
+			}
+			if j > 0 {
+				return rest[:j], true
+			}
+		}
+	}
+	return "", false
+}
+
+func isIdentChar(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9') ||
+		b >= 0x80 // allow multibyte unicode identifier runes
 }
 
 // couldNotImportPath extracts the import path from a go/types
