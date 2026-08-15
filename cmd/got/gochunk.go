@@ -48,17 +48,22 @@ func (goChunker) Split(content string) []chunk {
 		key string
 	}
 	var cuts []cut
+	impBlk := 0 // per-file ordinal of parenthesized import blocks
 	for _, d := range f.Decls {
-		// A parenthesized import block is decomposed into head "import (",
-		// one chunk per spec, and tail ")", so two branches adding different
-		// imports become independent chunk additions that the graph engine
-		// unions instead of conflicting on the whole block.
-		if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.IMPORT && g.Lparen.IsValid() {
+		// A parenthesized import block is decomposed into a head "import (", one
+		// chunk per spec, and a tail ")", each namespaced by the block ordinal,
+		// so two branches adding different imports become independent chunk
+		// additions the graph engine unions — and so multiple import blocks (or
+		// a block plus standalone imports) never get merged into one another.
+		if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.IMPORT && g.Lparen.IsValid() && len(g.Specs) > 0 {
+			b := impBlk
+			impBlk++
 			head := d.Pos()
 			if g.Doc != nil {
 				head = g.Doc.Pos()
 			}
-			cuts = append(cuts, cut{off: fset.Position(head).Offset, key: "import.head"})
+			cuts = append(cuts, cut{off: fset.Position(head).Offset, key: impBlockKey(b, "head", "")})
+			var lastSpecEnd token.Pos
 			for _, s := range g.Specs {
 				is := s.(*ast.ImportSpec)
 				at := is.Pos()
@@ -67,12 +72,16 @@ func (goChunker) Split(content string) []chunk {
 				}
 				cuts = append(cuts, cut{
 					off: lineStartOffset(src, fset.Position(at).Offset),
-					key: "import:" + importPath(is),
+					key: impBlockKey(b, "spec", importPath(is)),
 				})
+				lastSpecEnd = is.End()
 			}
+			// The tail owns everything from the line after the last spec up to
+			// and including ")", so a comment or directive sitting before ")" has
+			// a single stable owner and is not duplicated when specs are added.
 			cuts = append(cuts, cut{
-				off: lineStartOffset(src, fset.Position(g.Rparen).Offset),
-				key: "import.tail",
+				off: nextLineStart(src, fset.Position(lastSpecEnd).Offset),
+				key: impBlockKey(b, "tail", ""),
 			})
 			continue
 		}
@@ -308,6 +317,50 @@ func lineStartOffset(src string, off int) int {
 		i--
 	}
 	return i
+}
+
+// nextLineStart returns the offset of the start of the line after the one
+// containing off (used to give the import tail chunk ownership of trailing
+// trivia lines before the closing paren).
+func nextLineStart(src string, off int) int {
+	if off > len(src) {
+		off = len(src)
+	}
+	for off < len(src) && src[off] != '\n' {
+		off++
+	}
+	if off < len(src) {
+		return off + 1
+	}
+	return len(src)
+}
+
+// impBlockKey builds a chunk key for one part of the b-th parenthesized import
+// block: its head, its tail, or a spec (namespaced by path). The block ordinal
+// keeps distinct import blocks — and standalone imports — from grouping together.
+func impBlockKey(b int, kind, path string) string {
+	if kind == "spec" {
+		return fmt.Sprintf("impblk\x1f%d\x1fspec\x1f%s", b, path)
+	}
+	return fmt.Sprintf("impblk\x1f%d\x1f%s", b, kind)
+}
+
+// parseImpBlockKey decodes an import-block chunk key (with its trailing "#n"
+// occurrence suffix) into its block id and kind ("head"/"tail"/"spec").
+func parseImpBlockKey(key string) (id, kind string, ok bool) {
+	const pfx = "impblk\x1f"
+	if !strings.HasPrefix(key, pfx) {
+		return "", "", false
+	}
+	segs := strings.Split(key[len(pfx):], "\x1f")
+	if len(segs) < 2 {
+		return "", "", false
+	}
+	kindTok := segs[1]
+	if i := strings.IndexByte(kindTok, '#'); i >= 0 {
+		kindTok = kindTok[:i]
+	}
+	return segs[0], kindTok, true
 }
 
 // topLevelNames returns the package-scope identifiers a declaration introduces.

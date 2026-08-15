@@ -120,3 +120,19 @@ func TestGoChunkerSubFuncRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// Byte-fidelity for multiple/mixed import declarations and trailing block trivia.
+func TestGoChunkerMultiImportRoundTrip(t *testing.T) {
+	ch := newGoChunker()
+	cases := []string{
+		"package p\n\nimport (\n\t\"fmt\"\n)\n\nimport \"os\"\n\nfunc F() {}\n",
+		"package p\n\nimport (\n\t\"a\"\n)\n\nimport (\n\t\"b\"\n)\n",
+		"package p\n\nimport (\n\t\"fmt\"\n\t// keep sorted\n)\n\nfunc F() {}\n",
+		"package p\n\nimport (\n\t\"fmt\" // inline\n)\n",
+	}
+	for _, in := range cases {
+		if got := ch.Join(ch.Split(in)); got != in {
+			t.Fatalf("multi-import round-trip mismatch:\n in=%q\nout=%q", in, got)
+		}
+	}
+}
