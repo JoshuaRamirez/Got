@@ -1783,3 +1783,78 @@ func TestSemanticGateDotImportCascadeTolerated(t *testing.T) {
 		t.Fatalf("unresolved dot-import cascade must be tolerated: out=%q err=%q", out, errs)
 	}
 }
+
+// --- import grouping fixes (review of #62) ---
+
+// A parenthesized block plus a standalone import must not merge into one another:
+// each branch adds a spec to the block; the standalone stays a separate decl.
+func TestGoChunkMergeMixedImportDecls(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nimport (\n\t\"fmt\"\n)\n\nimport \"strings\"\n\nfunc base() { _ = fmt.Sprint; _ = strings.Title }\n"
+	a := "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nimport \"strings\"\n\nfunc base() { _ = fmt.Sprint; _ = strings.Title }\n\nfunc a() int { return len(os.Args) }\n"
+	b := "package main\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nimport \"strings\"\n\nfunc base() { _ = fmt.Sprint; _ = strings.Title }\n\nfunc b() error { return errors.New(\"x\") }\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", a)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "A", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", b)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "B", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("mixed import decls should merge cleanly: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	m := readFile(t, "out/m.go")
+	if !goValidityOK(m) {
+		t.Fatalf("merged mixed imports must be valid Go:\n%s", m)
+	}
+	for _, want := range []string{`"os"`, `"errors"`, `"strings"`, "func a()", "func b()"} {
+		if !strings.Contains(m, want) {
+			t.Fatalf("missing %q in:\n%s", want, m)
+		}
+	}
+	// The standalone import stays exactly one standalone decl (not pulled into
+	// the parenthesized block).
+	if strings.Count(m, "import \"strings\"") != 1 {
+		t.Fatalf("standalone import mishandled:\n%s", m)
+	}
+}
+
+// A trailing comment before the closing paren is owned by the tail, so a union
+// of imports does not duplicate it.
+func TestGoChunkMergeImportTrailingComment(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nimport (\n\t\"fmt\"\n\t// keep sorted\n)\n\nfunc base() { _ = fmt.Sprint }\n"
+	a := "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t// keep sorted\n)\n\nfunc base() { _ = fmt.Sprint }\n\nfunc a() int { return len(os.Args) }\n"
+	b := "package main\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t// keep sorted\n)\n\nfunc base() { _ = fmt.Sprint }\n\nfunc b() error { return errors.New(\"x\") }\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", a)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "A", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", b)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "B", "--actor", "t")
+
+	if code, _, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("trailing-comment import merge should be clean: %s", errs)
+	}
+	runCLI(t, "extract", "out")
+	m := readFile(t, "out/m.go")
+	if got := strings.Count(m, "keep sorted"); got != 1 {
+		t.Fatalf("trailing comment duplicated (%d times):\n%s", got, m)
+	}
+	if !goValidityOK(m) {
+		t.Fatalf("merged result must be valid:\n%s", m)
+	}
+}

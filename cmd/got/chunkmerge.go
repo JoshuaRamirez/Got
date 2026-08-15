@@ -115,7 +115,7 @@ func chunkMerge(path, base, left, right string) (string, bool) {
 		// Keep decomposed import chunks contiguous and correctly bracketed:
 		// generic ordering would append a newly-added spec after the block's
 		// tail (outside the parens). Regroup them as head, specs, tail.
-		seq = groupImportChunks(seq)
+		seq = groupImports(seq)
 	}
 	ordered := make([]chunk, 0, len(seq))
 	for _, k := range seq {
@@ -245,47 +245,80 @@ func equalSeq(a, b []string) bool {
 	return true
 }
 
-// groupImportChunks relocates decomposed import chunks (keys "import.head",
-// "import:<path>", "import.tail") into one contiguous, correctly-ordered block
-// — head(s), then specs, then tail(s) — positioned where the first import chunk
-// appeared. Without this, an import spec added on one side (an "addition") would
-// be appended by the generic reassembly after the block's closing paren,
-// producing unparseable Go. Multiple import blocks (rare) collapse into one.
-func groupImportChunks(seq []string) []string {
-	firstAt := -1
-	var heads, specs, tails, rest []string
+// groupImports relocates decomposed import chunks into one contiguous import
+// region positioned where the first import chunk appeared, so an import added on
+// one side (which the generic reassembly appends at end-of-file) lands with the
+// imports rather than after a later declaration. Each parenthesized block keeps
+// its own head → specs → tail grouping (blocks are namespaced by ordinal, so
+// distinct blocks and standalone imports never merge into one another). A
+// malformed block (not exactly one head and one tail — e.g. a single-line
+// `import ("x")` whose tail collapsed) is left in place rather than regrouped.
+func groupImports(seq []string) []string {
+	type block struct {
+		head, specs, tail []string
+	}
+	blocks := make(map[string]*block)
 	for _, k := range seq {
-		switch {
-		case strings.HasPrefix(k, "import.head"):
-			if firstAt < 0 {
-				firstAt = len(rest)
-			}
-			heads = append(heads, k)
-		case strings.HasPrefix(k, "import.tail"):
-			if firstAt < 0 {
-				firstAt = len(rest)
-			}
-			tails = append(tails, k)
-		case strings.HasPrefix(k, "import:"):
-			if firstAt < 0 {
-				firstAt = len(rest)
-			}
-			specs = append(specs, k)
+		id, kind, ok := parseImpBlockKey(k)
+		if !ok {
+			continue
+		}
+		b := blocks[id]
+		if b == nil {
+			b = &block{}
+			blocks[id] = b
+		}
+		switch kind {
+		case "head":
+			b.head = append(b.head, k)
+		case "tail":
+			b.tail = append(b.tail, k)
 		default:
-			rest = append(rest, k)
+			b.specs = append(b.specs, k)
 		}
 	}
-	if firstAt < 0 {
-		return seq // no import chunks
+	wellFormed := func(id string) bool {
+		b := blocks[id]
+		return b != nil && len(b.head) == 1 && len(b.tail) == 1
 	}
-	group := make([]string, 0, len(heads)+len(specs)+len(tails))
-	group = append(group, heads...)
-	group = append(group, specs...)
-	group = append(group, tails...)
+	// A chunk belongs to the relocatable import region if it is a standalone
+	// import decl or part of a well-formed block.
+	inRegion := func(k string) bool {
+		if id, _, ok := parseImpBlockKey(k); ok {
+			return wellFormed(id)
+		}
+		return strings.HasPrefix(k, "import:")
+	}
 
+	firstAt := -1
+	var rest, region []string
+	emitted := make(map[string]bool)
+	for _, k := range seq {
+		if !inRegion(k) {
+			rest = append(rest, k)
+			continue
+		}
+		if firstAt < 0 {
+			firstAt = len(rest)
+		}
+		if id, _, ok := parseImpBlockKey(k); ok {
+			if !emitted[id] {
+				b := blocks[id]
+				region = append(region, b.head...)
+				region = append(region, b.specs...)
+				region = append(region, b.tail...)
+				emitted[id] = true
+			}
+			continue // other chunks of this block already emitted in group order
+		}
+		region = append(region, k) // standalone import
+	}
+	if firstAt < 0 {
+		return seq // no relocatable import chunks
+	}
 	out := make([]string, 0, len(seq))
 	out = append(out, rest[:firstAt]...)
-	out = append(out, group...)
+	out = append(out, region...)
 	out = append(out, rest[firstAt:]...)
 	return out
 }
