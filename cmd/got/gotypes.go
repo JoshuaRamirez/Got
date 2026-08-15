@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"go/ast"
+	"go/build"
 	"go/build/constraint"
 	"go/importer"
 	"go/parser"
@@ -95,11 +96,15 @@ func typeCheckPackage(dir string, fset *token.FileSet, files []*ast.File) (bool,
 	if len(files) == 0 {
 		return true, ""
 	}
-	hasDotImport := false
+	// Paths of dot imports (`import . "x"`), which inject names — if one of these
+	// specifically fails to resolve, undefined-name errors are its cascade and
+	// must be tolerated. A *different* failed import must NOT license tolerating
+	// undefined names.
+	dotPaths := make(map[string]bool)
 	for _, f := range files {
 		for _, imp := range f.Imports {
 			if imp.Name != nil && imp.Name.Name == "." {
-				hasDotImport = true
+				dotPaths[importPath(imp)] = true
 			}
 		}
 	}
@@ -116,10 +121,10 @@ func typeCheckPackage(dir string, fset *token.FileSet, files []*ast.File) (bool,
 	}
 	_, _ = cfg.Check(dir, fset, files, nil)
 
-	importFailed := false
+	dotImportFailed := false
 	for _, m := range msgs {
-		if strings.Contains(m, "could not import") {
-			importFailed = true
+		if p, ok := couldNotImportPath(m); ok && dotPaths[p] {
+			dotImportFailed = true
 			break
 		}
 	}
@@ -130,13 +135,28 @@ func typeCheckPackage(dir string, fset *token.FileSet, files []*ast.File) (bool,
 	}
 	for _, m := range msgs {
 		if strings.Contains(m, "undefined:") || strings.Contains(m, "undeclared name") {
-			if hasDotImport && importFailed {
+			if dotImportFailed {
 				continue // names injected by an unresolvable dot import; tolerate
 			}
 			return false, m
 		}
 	}
 	return true, ""
+}
+
+// couldNotImportPath extracts the import path from a go/types
+// "could not import <path> (...)" error message.
+func couldNotImportPath(msg string) (string, bool) {
+	const pfx = "could not import "
+	i := strings.Index(msg, pfx)
+	if i < 0 {
+		return "", false
+	}
+	rest := msg[i+len(pfx):]
+	if j := strings.Index(rest, " ("); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.TrimSpace(rest), true
 }
 
 // --- build-constraint filtering ---
@@ -195,17 +215,24 @@ func buildExpr(content string) constraint.Expr {
 	return nil
 }
 
-// hostSatisfiesTag is an approximate evaluator for build tags against the host:
-// GOOS/GOARCH names, the "unix" meta-tag, the "gc"/"cgo" toolchain tags, and
-// goN.M version tags are treated as satisfied. Unknown tags are unsatisfied.
+// hostSatisfiesTag evaluates a build tag against the host build context. It uses
+// build.Default so goN.M release tags and cgo track the real toolchain rather
+// than a hand-rolled approximation. Unknown tags are unsatisfied.
 func hostSatisfiesTag(tag string) bool {
 	switch tag {
 	case runtime.GOOS, runtime.GOARCH, "gc":
 		return true
+	case "cgo":
+		return build.Default.CgoEnabled
 	case "unix":
 		return unixGOOS[runtime.GOOS]
 	}
-	return strings.HasPrefix(tag, "go1.")
+	for _, rt := range build.Default.ReleaseTags {
+		if tag == rt {
+			return true
+		}
+	}
+	return false
 }
 
 var knownOS = set("aix", "android", "darwin", "dragonfly", "freebsd", "hurd",
