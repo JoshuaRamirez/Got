@@ -1893,3 +1893,27 @@ func TestIntraFunctionSameLineStatements(t *testing.T) {
 		t.Fatalf("both same-line edits should survive:\n%s", m)
 	}
 }
+
+// With a *resolved* dot import present, a genuinely undefined name introduced by
+// the merge must still be refused — the dot-import tolerance is scoped to a
+// dot import that itself failed to resolve. Regression for the #65 follow-up.
+func TestSemanticGateResolvedDotImportStillCatchesUndefined(t *testing.T) {
+	initRepoInDir(t)
+	base := "package p\n\nimport . \"strings\"\n\nfunc A() string { return Title(\"x\") }\n"
+	writeFile(t, "a.go", base)
+	runCLI(t, "add", "a.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "b.go", "package p\n\nfunc B() int { return missingHelper() }\n") // undefined
+	runCLI(t, "add", "b.go")
+	runCLI(t, "commit", "-m", "undefined ref", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "c.go", "package p\n\nfunc C() {}\n")
+	runCLI(t, "add", "c.go")
+	runCLI(t, "commit", "-m", "add c", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("undefined name must be caught even with a resolved dot import: %q", out)
+	}
+}

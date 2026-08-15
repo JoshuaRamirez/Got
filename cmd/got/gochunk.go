@@ -74,7 +74,13 @@ func (goChunker) Split(content string) []chunk {
 					off: lineStartOffset(src, fset.Position(at).Offset),
 					key: impBlockKey(b, "spec", importPath(is)),
 				})
+				// Include the spec's own trailing comment so a multi-line inline
+				// comment is not split by the tail boundary (which would splice
+				// added specs inside the comment and silently comment them out).
 				lastSpecEnd = is.End()
+				if is.Comment != nil && is.Comment.End() > lastSpecEnd {
+					lastSpecEnd = is.Comment.End()
+				}
 			}
 			// The tail owns everything from the line after the last spec up to
 			// and including ")", so a comment or directive sitting before ")" has
