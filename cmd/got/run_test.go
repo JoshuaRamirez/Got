@@ -1510,7 +1510,11 @@ func TestGoChunkMergeReorderPreserved(t *testing.T) {
 		t.Fatalf("A's edit lost:\n%s", merged)
 	}
 	// The reorder (C before B) is preserved.
-	if strings.Index(merged, "func C()") > strings.Index(merged, "func B()") {
+	ci, bi := strings.Index(merged, "func C()"), strings.Index(merged, "func B()")
+	if ci < 0 || bi < 0 {
+		t.Fatalf("both C and B must be present:\n%s", merged)
+	}
+	if ci > bi {
 		t.Fatalf("reorder not preserved (C should precede B):\n%s", merged)
 	}
 }
@@ -1856,5 +1860,36 @@ func TestGoChunkMergeImportTrailingComment(t *testing.T) {
 	}
 	if !goValidityOK(m) {
 		t.Fatalf("merged result must be valid:\n%s", m)
+	}
+}
+
+// Two branches edit different statements that share a source line
+// (`func G() { a(); b() }`); statement-level chunking keeps them distinct so the
+// merge succeeds. Regression for the #64 review finding.
+func TestIntraFunctionSameLineStatements(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc G() { a(); b() }\n\nfunc a() {}\nfunc b() {}\n"
+	fa := "package main\n\nfunc G() { a2(); b() }\n\nfunc a() {}\nfunc a2() {}\nfunc b() {}\n"
+	fb := "package main\n\nfunc G() { a(); b2() }\n\nfunc a() {}\nfunc b() {}\nfunc b2() {}\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", fa)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "a", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", fb)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "b", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("same-line statement edits should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	m := readFile(t, "out/m.go")
+	if !strings.Contains(m, "a2()") || !strings.Contains(m, "b2()") {
+		t.Fatalf("both same-line edits should survive:\n%s", m)
 	}
 }

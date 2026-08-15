@@ -62,3 +62,27 @@ func TestMergeChunkOrder(t *testing.T) {
 	seq, ok = mergeChunkOrder(ch("A", "B"), ch("B", "A"), ch("A"), survive("A"))
 	eq(seq, ok, true, "A")
 }
+
+// Both sides reorder but delete different chunks; the surviving relative order
+// agrees, so the merge must be accepted (not a false conflict). Regression for
+// the #61 review finding.
+func TestMergeChunkOrderBothReorderWithDeletion(t *testing.T) {
+	ch := func(keys ...string) []chunk {
+		out := make([]chunk, len(keys))
+		for i, k := range keys {
+			out[i] = chunk{Key: k}
+		}
+		return out
+	}
+	// base A,B,C,D ; left B,A,C (deleted D) ; right B,A,D (deleted C).
+	// Content merge honors both deletions → only A,B survive.
+	body := map[string]string{"A": "", "B": ""}
+	seq, ok := mergeChunkOrder(
+		ch("A", "B", "C", "D"), ch("B", "A", "C"), ch("B", "A", "D"), body)
+	if !ok {
+		t.Fatal("compatible surviving order must be accepted despite differing deletions")
+	}
+	if len(seq) != 2 || seq[0] != "B" || seq[1] != "A" {
+		t.Fatalf("want [B A], got %v", seq)
+	}
+}

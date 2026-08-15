@@ -101,14 +101,26 @@ func (goChunker) Split(content string) []chunk {
 		// to surface as a conflict (never a silent scramble — the go/types gate
 		// UC-U40 backstops any result that would not type-check).
 		if fn, ok := d.(*ast.FuncDecl); ok && fn.Body != nil && len(fn.Body.List) > 0 {
+			// Each statement's cut is its line start (so it owns its leading
+			// indentation); but when statements share a line (e.g. `a(); b()`)
+			// the line start collapses and the monotonicity filter would drop
+			// all but the first, leaving the body one chunk. Fall back to the
+			// statement's own token offset to keep same-line statements distinct.
+			last := fset.Position(start).Offset
 			for i, stmt := range fn.Body.List {
-				at := lineStartOffset(src, fset.Position(stmt.Pos()).Offset)
+				pos := fset.Position(stmt.Pos()).Offset
+				at := lineStartOffset(src, pos)
+				if at <= last {
+					at = pos
+				}
 				cuts = append(cuts, cut{off: at, key: fmt.Sprintf("%s\x1f%d", key, i)})
+				last = at
 			}
-			cuts = append(cuts, cut{
-				off: lineStartOffset(src, fset.Position(fn.Body.Rbrace).Offset),
-				key: key + "\x1ftail",
-			})
+			tail := lineStartOffset(src, fset.Position(fn.Body.Rbrace).Offset)
+			if tail <= last {
+				tail = fset.Position(fn.Body.Rbrace).Offset
+			}
+			cuts = append(cuts, cut{off: tail, key: key + "\x1ftail"})
 		}
 	}
 	sort.SliceStable(cuts, func(i, j int) bool { return cuts[i].off < cuts[j].off })

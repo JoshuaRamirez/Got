@@ -162,7 +162,11 @@ func mergeChunkOrder(base, left, right []chunk, body map[string]string) ([]strin
 	case rReordered && !lReordered:
 		authority, otherAdds = rKeys, [][]string{lKeys}
 	default: // both reordered
-		if !equalSeq(commonOrder(lKeys, baseSet), commonOrder(rKeys, baseSet)) {
+		// Compare only the chunks that jointly SURVIVED the content merge: a
+		// chunk deleted on one side (absent from body) should simply drop out,
+		// not force a false conflict when the two sides differ solely in what
+		// they deleted.
+		if !equalSeq(survivingCommon(lKeys, baseSet, body), survivingCommon(rKeys, baseSet, body)) {
 			return nil, false
 		}
 		authority, otherAdds = lKeys, [][]string{rKeys}
@@ -211,6 +215,22 @@ func commonOrder(keys []string, baseSet map[string]bool) []string {
 	var out []string
 	for _, k := range keys {
 		if baseSet[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// survivingCommon is the subsequence of base keys that also survived the content
+// merge (present in body) — used to compare two-sided reorders ignoring chunks
+// that were deleted.
+func survivingCommon(keys []string, baseSet map[string]bool, body map[string]string) []string {
+	var out []string
+	for _, k := range keys {
+		if !baseSet[k] {
+			continue
+		}
+		if _, alive := body[k]; alive {
 			out = append(out, k)
 		}
 	}
