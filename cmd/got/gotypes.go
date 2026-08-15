@@ -3,11 +3,13 @@ package main
 import (
 	"encoding/base64"
 	"go/ast"
+	"go/build/constraint"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -20,123 +22,242 @@ import (
 // branch deleted (an undefined name). It is the graph-VCS analogue of "does the
 // merge still compile" — a check git cannot make because it has no type system.
 //
-// Scope is deliberately honest and bounded:
-//   - It only type-checks packages that a changed file belongs to (cheap, and it
-//     never judges code the merge did not touch).
-//   - It tolerates everything that is not an in-package redeclaration or
-//     undefined name: parse errors (the structural gate owns syntax), imports it
-//     cannot resolve (the sandbox lacks the module's own internal deps), and
-//     unused-import/variable warnings. So it is a *within-package* correctness
-//     net, not a whole-program build.
-//
-// It returns ok == true (with empty detail) whenever it cannot make a confident
-// negative judgement, so it never blocks a merge on its own uncertainty.
+// Scope is deliberately honest and bounded to a *within-package* net, not a
+// whole-program build. It tolerates (never refuses on): parse errors (the
+// structural gate owns syntax), imports it cannot resolve (the sandbox lacks the
+// module's own internal deps), unused-import/variable warnings, and the
+// undefined-name cascade that follows an unresolved dot import. It respects
+// build constraints (so mutually-exclusive platform files are not judged as
+// duplicates) and partitions a directory by declared package (so an external
+// `_test` package does not mask the production package). It returns ok == true
+// whenever it cannot make a confident negative judgement.
 func semanticGateOK(merged graph.Graph, base graph.Snapshot) (bool, string) {
-	files := goFilesByDir(fileContents(merged))
-	baseContent := fileContentByPath(base)
+	mergedFiles := goOnly(fileContents(merged))
+	baseFiles := goOnly(fileContentByPath(base))
 
-	// Only gate directories that actually changed in this merge.
-	dirs := make([]string, 0, len(files))
-	for dir, byPath := range files {
-		changed := false
-		for p, content := range byPath {
-			if baseContent[p] != content {
-				changed = true
-				break
-			}
-		}
-		if changed {
-			dirs = append(dirs, dir)
+	// A directory is "changed" if any .go file in it was added, edited, or
+	// deleted — deletions included, so removing a helper used elsewhere is gated.
+	changed := make(map[string]bool)
+	for p, c := range mergedFiles {
+		if bc, ok := baseFiles[p]; !ok || bc != c {
+			changed[filepath.Dir(p)] = true
 		}
 	}
-	sort.Strings(dirs)
+	for p := range baseFiles {
+		if _, ok := mergedFiles[p]; !ok {
+			changed[filepath.Dir(p)] = true
+		}
+	}
 
+	byDir := filesByDir(mergedFiles)
+	dirs := sortedKeys(changed)
 	for _, dir := range dirs {
-		if ok, detail := typeCheckPackage(dir, files[dir]); !ok {
+		if ok, detail := typeCheckDir(dir, byDir[dir]); !ok {
 			return false, detail
 		}
 	}
 	return true, ""
 }
 
-// typeCheckPackage parses and type-checks all .go files of one directory
-// together. It returns ok == false only on an in-package redeclaration or
-// undefined-name error; parse failures and unresolved imports are tolerated.
-func typeCheckPackage(dir string, byPath map[string]string) (bool, string) {
+// typeCheckDir filters a directory's files to those the host build context would
+// compile, partitions them by declared package, and type-checks each package.
+func typeCheckDir(dir string, byPath map[string]string) (bool, string) {
 	fset := token.NewFileSet()
-	var asts []*ast.File
-	names := make([]string, 0, len(byPath))
-	for p := range byPath {
-		names = append(names, p)
-	}
-	sort.Strings(names) // deterministic
-	for _, p := range names {
-		f, err := parser.ParseFile(fset, p, byPath[p], 0)
+	pkgs := make(map[string][]*ast.File)
+	pkgOrder := []string{}
+	for _, p := range sortedKeys(byPath) {
+		if !buildMatchesHost(p, byPath[p]) {
+			continue // constrained to another platform; not part of this build
+		}
+		f, err := parser.ParseFile(fset, p, byPath[p], parser.ParseComments)
 		if err != nil {
 			return true, "" // not valid Go syntax — the structural gate owns this
 		}
-		asts = append(asts, f)
+		name := f.Name.Name
+		if _, seen := pkgs[name]; !seen {
+			pkgOrder = append(pkgOrder, name)
+		}
+		pkgs[name] = append(pkgs[name], f)
 	}
-	if len(asts) == 0 {
-		return true, ""
-	}
-
-	var fatal string
-	cfg := &types.Config{
-		Importer:                 importer.Default(),
-		DisableUnusedImportCheck: true, // unused-import is not a merge hazard we judge
-		Error: func(err error) {
-			if fatal != "" {
-				return
-			}
-			te, ok := err.(types.Error)
-			if !ok {
-				return
-			}
-			if msg := te.Msg; isMergeHazard(msg) {
-				fatal = msg
-			}
-		},
-	}
-	// Check reports the first error as its return; we rely on cfg.Error to see
-	// them all and to classify. Ignore the returned error.
-	_, _ = cfg.Check(dir, fset, asts, nil)
-	if fatal != "" {
-		return false, fatal
+	sort.Strings(pkgOrder)
+	for _, name := range pkgOrder {
+		if ok, detail := typeCheckPackage(dir, fset, pkgs[name]); !ok {
+			return false, detail
+		}
 	}
 	return true, ""
 }
 
-// isMergeHazard classifies a go/types error message as one that indicates the
-// merge produced structurally broken code (as opposed to an unresolved external
-// import, which the sandbox cannot help). Kept to unambiguous phrases.
-func isMergeHazard(msg string) bool {
-	switch {
-	case strings.Contains(msg, "redeclared"):
-		return true
-	case strings.Contains(msg, "undefined:"):
-		return true
-	case strings.Contains(msg, "undeclared name"):
-		return true
-	default:
-		return false
+// typeCheckPackage type-checks one package's files and classifies the errors.
+// Redeclarations are always fatal; undefined names are fatal unless they are the
+// cascade from an unresolved dot import.
+func typeCheckPackage(dir string, fset *token.FileSet, files []*ast.File) (bool, string) {
+	if len(files) == 0 {
+		return true, ""
 	}
+	hasDotImport := false
+	for _, f := range files {
+		for _, imp := range f.Imports {
+			if imp.Name != nil && imp.Name.Name == "." {
+				hasDotImport = true
+			}
+		}
+	}
+
+	var msgs []string
+	cfg := &types.Config{
+		Importer:                 importer.Default(),
+		DisableUnusedImportCheck: true,
+		Error: func(err error) {
+			if te, ok := err.(types.Error); ok {
+				msgs = append(msgs, te.Msg)
+			}
+		},
+	}
+	_, _ = cfg.Check(dir, fset, files, nil)
+
+	importFailed := false
+	for _, m := range msgs {
+		if strings.Contains(m, "could not import") {
+			importFailed = true
+			break
+		}
+	}
+	for _, m := range msgs {
+		if strings.Contains(m, "redeclared") {
+			return false, m
+		}
+	}
+	for _, m := range msgs {
+		if strings.Contains(m, "undefined:") || strings.Contains(m, "undeclared name") {
+			if hasDotImport && importFailed {
+				continue // names injected by an unresolvable dot import; tolerate
+			}
+			return false, m
+		}
+	}
+	return true, ""
 }
 
-// goFilesByDir groups .go file contents by their directory (a package's files
-// live in one directory).
-func goFilesByDir(byPath map[string]string) map[string]map[string]string {
-	out := make(map[string]map[string]string)
-	for p, content := range byPath {
-		if !strings.HasSuffix(p, ".go") {
+// --- build-constraint filtering ---
+
+// buildMatchesHost reports whether a file is compiled for the host GOOS/GOARCH,
+// honoring both the filename `_GOOS_GOARCH` suffix convention and a `//go:build`
+// constraint line. Used so mutually-exclusive platform files (e.g. foo_linux.go
+// and foo_windows.go) are not type-checked together and mis-reported as
+// duplicate declarations.
+func buildMatchesHost(path, content string) bool {
+	if !filenameMatchesHost(path) {
+		return false
+	}
+	if expr := buildExpr(content); expr != nil {
+		return expr.Eval(hostSatisfiesTag)
+	}
+	return true
+}
+
+func filenameMatchesHost(path string) bool {
+	name := strings.TrimSuffix(filepath.Base(path), ".go")
+	name = strings.TrimSuffix(name, "_test")
+	parts := strings.Split(name, "_")
+	n := len(parts)
+	// _GOOS_GOARCH (needs a prefix component before the two tags)
+	if n >= 3 && knownOS[parts[n-2]] && knownArch[parts[n-1]] {
+		return parts[n-2] == runtime.GOOS && parts[n-1] == runtime.GOARCH
+	}
+	// _GOARCH or _GOOS (needs a prefix component)
+	if n >= 2 && knownArch[parts[n-1]] {
+		return parts[n-1] == runtime.GOARCH
+	}
+	if n >= 2 && knownOS[parts[n-1]] {
+		return parts[n-1] == runtime.GOOS
+	}
+	return true
+}
+
+// buildExpr extracts a //go:build constraint from a file's leading comments.
+func buildExpr(content string) constraint.Expr {
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
 			continue
 		}
+		if strings.HasPrefix(t, "//") {
+			if constraint.IsGoBuild(t) {
+				if e, err := constraint.Parse(t); err == nil {
+					return e
+				}
+			}
+			continue
+		}
+		break // first non-comment, non-blank line ends the constraint zone
+	}
+	return nil
+}
+
+// hostSatisfiesTag is an approximate evaluator for build tags against the host:
+// GOOS/GOARCH names, the "unix" meta-tag, the "gc"/"cgo" toolchain tags, and
+// goN.M version tags are treated as satisfied. Unknown tags are unsatisfied.
+func hostSatisfiesTag(tag string) bool {
+	switch tag {
+	case runtime.GOOS, runtime.GOARCH, "gc":
+		return true
+	case "unix":
+		return unixGOOS[runtime.GOOS]
+	}
+	return strings.HasPrefix(tag, "go1.")
+}
+
+var knownOS = set("aix", "android", "darwin", "dragonfly", "freebsd", "hurd",
+	"illumos", "ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9",
+	"solaris", "wasip1", "windows", "zos")
+
+var knownArch = set("386", "amd64", "amd64p32", "arm", "arm64", "arm64be",
+	"armbe", "loong64", "mips", "mips64", "mips64le", "mips64p32", "mips64p32le",
+	"mipsle", "ppc", "ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x",
+	"sparc", "sparc64", "wasm")
+
+var unixGOOS = set("aix", "android", "darwin", "dragonfly", "freebsd", "hurd",
+	"illumos", "ios", "linux", "netbsd", "openbsd", "solaris")
+
+func set(xs ...string) map[string]bool {
+	m := make(map[string]bool, len(xs))
+	for _, x := range xs {
+		m[x] = true
+	}
+	return m
+}
+
+// --- helpers ---
+
+func goOnly(byPath map[string]string) map[string]string {
+	out := make(map[string]string)
+	for p, c := range byPath {
+		if strings.HasSuffix(p, ".go") {
+			out[p] = c
+		}
+	}
+	return out
+}
+
+func filesByDir(byPath map[string]string) map[string]map[string]string {
+	out := make(map[string]map[string]string)
+	for p, content := range byPath {
 		dir := filepath.Dir(p)
 		if out[dir] == nil {
 			out[dir] = make(map[string]string)
 		}
 		out[dir][p] = content
 	}
+	return out
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 

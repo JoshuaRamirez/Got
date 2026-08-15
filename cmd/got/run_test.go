@@ -1637,7 +1637,7 @@ func TestSemanticGateToleratesUnresolvedImport(t *testing.T) {
 	runCLI(t, "add", "m.go")
 	runCLI(t, "commit", "-m", "base", "--actor", "t")
 	runCLI(t, "checkout", "-b", "featA")
-	writeFile(t, "x.go", "package main\n\nimport \"github.com/nope/pkg\"\n\nfunc useIt() { pkg.Do() }\n")
+	writeFile(t, "x.go", "package main\n\nimport \"example.invalid/pkg\"\n\nfunc useIt() { pkg.Do() }\n")
 	runCLI(t, "add", "x.go")
 	runCLI(t, "commit", "-m", "add x", "--actor", "t")
 	runCLI(t, "checkout", "main")
@@ -1713,5 +1713,73 @@ func TestIntraFunctionSameStatementConflicts(t *testing.T) {
 
 	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
 		t.Fatalf("same-statement divergent edits must conflict, got clean: %q", out)
+	}
+}
+
+// --- semantic gate hardening (review fixes on UC-U40) ---
+
+// Build-constrained files that define the same symbol for different platforms
+// must not be seen as a redeclaration (only one platform compiles).
+func TestSemanticGateBuildConstraints(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "base.go", "package p\n\nfunc Common() {}\n")
+	runCLI(t, "add", "base.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "plat_linux.go", "//go:build linux\n\npackage p\n\nfunc Plat() string { return \"l\" }\n")
+	runCLI(t, "add", "plat_linux.go")
+	runCLI(t, "commit", "-m", "linux", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "plat_windows.go", "//go:build windows\n\npackage p\n\nfunc Plat() string { return \"w\" }\n")
+	runCLI(t, "add", "plat_windows.go")
+	runCLI(t, "commit", "-m", "windows", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("mutually-exclusive platform files must not be a redeclaration: out=%q err=%q", out, errs)
+	}
+}
+
+// A directory containing an external `_test` package must not mask a real
+// redeclaration in the production package.
+func TestSemanticGateProductionPackageNotMasked(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "a.go", "package p\n\nfunc Foo() int { return 1 }\n")
+	runCLI(t, "add", "a.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "b.go", "package p\n\nfunc Foo() int { return 2 }\n") // dup in production package
+	runCLI(t, "add", "b.go")
+	runCLI(t, "commit", "-m", "dup", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "a_test.go", "package p_test\n\nfunc unused() {}\n") // external test pkg, sorts first
+	runCLI(t, "add", "a_test.go")
+	runCLI(t, "commit", "-m", "test file", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("production redeclaration must be caught despite a _test package: %q", out)
+	}
+}
+
+// An unresolved *dot* import produces a cascade of undefined-name errors; those
+// must be tolerated (not treated as a merge hazard).
+func TestSemanticGateDotImportCascadeTolerated(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "base.go", "package p\n\nfunc A() int { return 1 }\n")
+	runCLI(t, "add", "base.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "x.go", "package p\n\nimport . \"example.invalid/dep\"\n\nfunc useDot() { Do() }\n")
+	runCLI(t, "add", "x.go")
+	runCLI(t, "commit", "-m", "dot import", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "y.go", "package p\n\nfunc B() int { return 2 }\n")
+	runCLI(t, "add", "y.go")
+	runCLI(t, "commit", "-m", "add y", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("unresolved dot-import cascade must be tolerated: out=%q err=%q", out, errs)
 	}
 }
