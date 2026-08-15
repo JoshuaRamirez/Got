@@ -63,7 +63,14 @@ func reconcileFilesByChunk(base, left, right graph.Snapshot) (graph.Snapshot, gr
 		}
 		merged, ok := chunkMerge(path, bc, lc, rc)
 		if !ok {
-			continue // chunk-level conflict; leave for the file-level merge
+			// The structural merge could not reconcile the file (or its result
+			// failed the gate). Fall back to a line-level three-way merge, which
+			// gives at least git's textual merge — closing the cases where the
+			// chunker is coarser than a line merge. Still gated for validity.
+			merged, ok = diff3Merge(path, bc, lc, rc)
+		}
+		if !ok {
+			continue // still conflicts; leave for the file-level merge
 		}
 		setContent(&leftOut.Vertices[li], merged)
 		setContent(&rightOut.Vertices[ri], merged)
@@ -71,14 +78,20 @@ func reconcileFilesByChunk(base, left, right graph.Snapshot) (graph.Snapshot, gr
 	return leftOut, rightOut
 }
 
-// chunkMerge decomposes base/left/right into chunks, merges them through the
-// graph three-way engine, reassembles the merged file, and validity-gates it.
-// It returns ok == false in any of three cases: the engine reports a chunk-level
-// content conflict (both sides changed the same chunk differently); the chunk
-// order cannot be three-way merged (both sides reordered incompatibly); or the
-// reassembled file fails the structural-validity gate. In every such case the
-// file is left for the file-level merge to flag.
+// chunkMerge is the structural (symbol/declaration-aware) merge. It is applied
+// only to Go files, where the chunker keys chunks by symbol and statement
+// position — so an edit is a modification, never a content-keyed delete+add that
+// could reorder. For non-Go files there is no sound structural chunker (keying
+// generic lines by content scrambles edits), so this returns false and the
+// caller falls back to the line-level diff3 merge.
+//
+// It reassembles the merged file, validity-gates it, and returns ok == false on
+// any chunk-content conflict, incompatible reorder, or gate failure — leaving
+// the file to the diff3 fallback and then the file-level merge.
 func chunkMerge(path, base, left, right string) (string, bool) {
+	if !strings.HasSuffix(path, ".go") {
+		return "", false
+	}
 	ch := chunkerFor(path)
 	bC, lC, rC := ch.Split(base), ch.Split(left), ch.Split(right)
 

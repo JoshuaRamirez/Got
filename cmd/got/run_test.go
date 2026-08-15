@@ -1939,3 +1939,63 @@ func TestSemanticGateDotImportUnexportedStillCaught(t *testing.T) {
 		t.Fatalf("unexported undefined name must be caught even with an unresolved dot import: %q", out)
 	}
 }
+
+// --- diff3 line-level merge fallback (UC-U42) ---
+
+// A non-Go file with disjoint line edits merges (git parity) with the CORRECT
+// order — the block chunker's content-keying used to silently scramble this.
+func TestDiff3FallbackNonGo(t *testing.T) {
+	initRepoInDir(t)
+	base := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "notes.txt", base)
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "notes.txt", "C1\nl2\nl3\nl4\nl5\n")
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "edit top", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "notes.txt", "l1\nl2\nl3\nl4\nC5\n")
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "edit bottom", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("disjoint line edits should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if got := readFile(t, "out/notes.txt"); got != "C1\nl2\nl3\nl4\nC5\n" {
+		t.Fatalf("wrong merge (scramble?): %q", got)
+	}
+}
+
+// A statement inserted on one side while a distant statement is edited on the
+// other merges via the diff3 fallback (the structural positional merge would
+// conflict on the shift).
+func TestDiff3FallbackIntraFunctionInsert(t *testing.T) {
+	initRepoInDir(t)
+	base := "package main\n\nfunc Big() int {\n\ta := 1\n\tb := 2\n\tc := 3\n\td := 4\n\treturn a + b + c + d\n}\n"
+	fa := "package main\n\nfunc Big() int {\n\ta := 1\n\tins := 9\n\tb := 2\n\tc := 3\n\td := 4\n\treturn a + b + c + d\n}\n"
+	fb := "package main\n\nfunc Big() int {\n\ta := 1\n\tb := 2\n\tc := 3\n\td := 400\n\treturn a + b + c + d\n}\n"
+	writeFile(t, "m.go", base)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "m.go", fa)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "insert", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "m.go", fb)
+	runCLI(t, "add", "m.go")
+	runCLI(t, "commit", "-m", "edit d", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("insert + distant edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	m := readFile(t, "out/m.go")
+	if !strings.Contains(m, "ins := 9") || !strings.Contains(m, "d := 400") || !goValidityOK(m) {
+		t.Fatalf("both changes should survive and be valid:\n%s", m)
+	}
+}
