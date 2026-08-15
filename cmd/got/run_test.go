@@ -1917,3 +1917,25 @@ func TestSemanticGateResolvedDotImportStillCatchesUndefined(t *testing.T) {
 		t.Fatalf("undefined name must be caught even with a resolved dot import: %q", out)
 	}
 }
+
+// With an unresolved dot import, an UNEXPORTED undefined name (which a dot import
+// could never supply) must still be refused. Regression for the #68 follow-up.
+func TestSemanticGateDotImportUnexportedStillCaught(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "a.go", "package p\n\nimport . \"example.invalid/dep\"\n\nfunc A() { Do() }\n")
+	runCLI(t, "add", "a.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "b.go", "package p\n\nfunc B() int { return missingHelper() }\n") // unexported, genuinely missing
+	runCLI(t, "add", "b.go")
+	runCLI(t, "commit", "-m", "undefined", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "c.go", "package p\n\nfunc C() {}\n")
+	runCLI(t, "add", "c.go")
+	runCLI(t, "commit", "-m", "c", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("unexported undefined name must be caught even with an unresolved dot import: %q", out)
+	}
+}

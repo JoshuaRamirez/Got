@@ -130,6 +130,7 @@ func TestGoChunkerMultiImportRoundTrip(t *testing.T) {
 		"package p\n\nimport (\n\t\"fmt\"\n\t// keep sorted\n)\n\nfunc F() {}\n",
 		"package p\n\nimport (\n\t\"fmt\" // inline\n)\n",
 		"package p\n\nimport (\n\t\"fmt\" /* multi\n\tline */\n)\n",
+		"package p\n\nimport (\n\t\"fmt\" /* multi\n\tline */)\n",
 	}
 	for _, in := range cases {
 		if got := ch.Join(ch.Split(in)); got != in {
