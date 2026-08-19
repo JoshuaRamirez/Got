@@ -9,11 +9,19 @@ import (
 	"github.com/joshuaramirez/got/internal/ontology"
 )
 
-// renameSimilarityThreshold is the minimum line-LCS similarity for a
-// delete+add pair to be treated as a rename. Conservative relative to git's
-// default 50%: a pair must share at least 60% of the larger file's lines
-// under LCS, and be each side's unique best match.
-const renameSimilarityThreshold = 0.60
+// Rename similarity is shared/max(n,m) ≥ 3/5. Conservative relative to git's
+// default 50%. Compared as integers (cross-multiply) so equal rationals with
+// different denominators still tie.
+const (
+	renameSimNum = 3
+	renameSimDen = 5
+)
+
+// renameLCSMaxWork is the maximum n×m line-count product for which rename
+// scoring runs a linear-memory LCS. Larger pairs use bag-of-lines overlap
+// instead, so a tens-of-thousands-of-lines candidate cannot allocate an
+// (n+1)×(m+1) matrix. Diff3's merge-time lcsMatch is unchanged.
+const renameLCSMaxWork = 2_000_000
 
 // reconcileRenames is the UC-U43 path-identity pre-pass. After same-path
 // chunk/diff3 reconciliation, it pairs a base path that disappeared on one
@@ -85,15 +93,17 @@ func reconcileRenames(base, left, right graph.Snapshot) (graph.Snapshot, graph.S
 			continue // genuine content conflict; leave delete+add / modify-delete
 		}
 
-		mode := fileModeAt(leftOut, dest)
-		if mode == "" {
-			mode = fileModeAt(rightOut, dest)
-		}
-		if mode == "" {
-			mode = fileModeAt(leftOut, old)
-		}
-		if mode == "" {
-			mode = fileModeAt(rightOut, old)
+		// Mode is a three-way attribute merge against the base and both
+		// sides (dest if that side renamed, else the old path). A one-sided
+		// chmod on the non-renaming side must survive; a two-sided mode
+		// conflict leaves the rename unapplied.
+		mode, ok := mergeMode(
+			fileModeAt(base, old),
+			sideMode(left, old, dest, lOK),
+			sideMode(right, old, dest, rOK),
+		)
+		if !ok {
+			continue
 		}
 
 		applyRenameResult(&leftOut, old, dest, merged, mode, lOK)
@@ -103,7 +113,7 @@ func reconcileRenames(base, left, right graph.Snapshot) (graph.Snapshot, graph.S
 }
 
 // matchRenames returns oldPath → newPath for delete+add pairs that are each
-// other's unique best match at or above renameSimilarityThreshold.
+// other's unique best match at or above the 3/5 similarity threshold.
 func matchRenames(base, side map[string]string) map[string]string {
 	var deleted, added []string
 	for p := range base {
@@ -123,17 +133,15 @@ func matchRenames(base, side map[string]string) map[string]string {
 	}
 
 	bestNew := make(map[string]string, len(deleted))
-	bestNewScore := make(map[string]float64, len(deleted))
 	for _, d := range deleted {
-		p, score, ok := uniqueBest(base[d], added, func(p string) string { return side[p] })
+		p, ok := uniqueBest(base[d], added, func(p string) string { return side[p] })
 		if ok {
 			bestNew[d] = p
-			bestNewScore[d] = score
 		}
 	}
 	bestOld := make(map[string]string, len(added))
 	for _, a := range added {
-		p, _, ok := uniqueBest(side[a], deleted, func(p string) string { return base[p] })
+		p, ok := uniqueBest(side[a], deleted, func(p string) string { return base[p] })
 		if ok {
 			bestOld[a] = p
 		}
@@ -141,63 +149,186 @@ func matchRenames(base, side map[string]string) map[string]string {
 
 	out := make(map[string]string)
 	for d, a := range bestNew {
-		if bestOld[a] == d && bestNewScore[d] >= renameSimilarityThreshold {
+		if bestOld[a] == d {
 			out[d] = a
 		}
 	}
 	return out
 }
 
+// simFrac is a similarity shared/maxLen, compared as a rational so 3/5 and
+// 6/10 are a tie.
+type simFrac struct {
+	shared, maxLen int
+}
+
+// cmpSim compares a and b as rationals (shared/maxLen). Returns 1 if a is
+// strictly better, -1 if b is, 0 if they tie.
+func cmpSim(a, b simFrac) int {
+	left := int64(a.shared) * int64(b.maxLen)
+	right := int64(b.shared) * int64(a.maxLen)
+	switch {
+	case left > right:
+		return 1
+	case left < right:
+		return -1
+	default:
+		return 0
+	}
+}
+
+func meetsRenameThreshold(s simFrac) bool {
+	if s.maxLen <= 0 {
+		return false
+	}
+	return int64(s.shared)*int64(renameSimDen) >= int64(s.maxLen)*int64(renameSimNum)
+}
+
 // uniqueBest returns the unique highest-scoring candidate at or above the
 // rename threshold. A tie for first place is not a match.
-func uniqueBest(target string, cands []string, content func(string) string) (string, float64, bool) {
+func uniqueBest(target string, cands []string, content func(string) string) (string, bool) {
 	var best string
-	var bestScore float64
+	var bestScore simFrac
 	tied := false
 	found := false
 	for _, c := range cands {
-		s := lineSimilarity(target, content(c))
-		if s < renameSimilarityThreshold {
+		s := lineSimFrac(target, content(c))
+		if !meetsRenameThreshold(s) {
 			continue
 		}
-		if !found || s > bestScore {
+		if !found {
 			best, bestScore, tied, found = c, s, false, true
 			continue
 		}
-		if s == bestScore {
+		switch cmpSim(s, bestScore) {
+		case 1:
+			best, bestScore, tied = c, s, false
+		case 0:
 			tied = true
 		}
 	}
 	if !found || tied {
-		return "", 0, false
+		return "", false
 	}
-	return best, bestScore, true
+	return best, true
 }
 
-// lineSimilarity is LCS(lines) / max(n, m). Empty files score 0 so they never
-// match as renames. A size-ratio fast reject skips the LCS when the threshold
-// is unreachable.
-func lineSimilarity(a, b string) float64 {
+// lineSimFrac is shared/max(n,m) for rename scoring. Empty files score 0.
+// Pairs whose n×m product exceeds renameLCSMaxWork use bag-of-lines overlap
+// (linear memory) instead of LCS, so scoring cannot allocate gigabytes.
+func lineSimFrac(a, b string) simFrac {
 	la, lb := splitLinesKeepEOL(a), splitLinesKeepEOL(b)
 	n, m := len(la), len(lb)
 	if n == 0 || m == 0 {
-		return 0
+		return simFrac{0, 1}
 	}
 	maxLen, minLen := n, m
 	if m > n {
 		maxLen, minLen = m, n
 	}
-	if float64(minLen) < renameSimilarityThreshold*float64(maxLen) {
+	if int64(minLen)*int64(renameSimDen) < int64(maxLen)*int64(renameSimNum) {
+		return simFrac{0, maxLen}
+	}
+	var shared int
+	if m > 0 && n > renameLCSMaxWork/m {
+		shared = lineBagOverlap(la, lb)
+	} else {
+		shared = lcsLen(la, lb)
+	}
+	return simFrac{shared, maxLen}
+}
+
+// lineSimilarity is the floating form of lineSimFrac, kept for tests.
+func lineSimilarity(a, b string) float64 {
+	s := lineSimFrac(a, b)
+	return float64(s.shared) / float64(s.maxLen)
+}
+
+// lcsLen is the LCS length of two line slices using two rows (O(min(n,m))
+// memory). Used only for rename scoring; diff3 still uses lcsMatch.
+func lcsLen(a, b []string) int {
+	n, m := len(a), len(b)
+	if n == 0 || m == 0 {
 		return 0
 	}
-	return float64(len(lcsMatch(la, lb))) / float64(maxLen)
+	if n < m {
+		a, b = b, a
+		n, m = m, n
+	}
+	prev := make([]int, m+1)
+	cur := make([]int, m+1)
+	for i := 1; i <= n; i++ {
+		for j := 1; j <= m; j++ {
+			if a[i-1] == b[j-1] {
+				cur[j] = prev[j-1] + 1
+			} else if prev[j] >= cur[j-1] {
+				cur[j] = prev[j]
+			} else {
+				cur[j] = cur[j-1]
+			}
+		}
+		prev, cur = cur, prev
+	}
+	return prev[m]
+}
+
+// lineBagOverlap is the multiset intersection size of two line slices.
+func lineBagOverlap(a, b []string) int {
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	count := make(map[string]int, len(a))
+	for _, ln := range a {
+		count[ln]++
+	}
+	n := 0
+	for _, ln := range b {
+		if count[ln] > 0 {
+			count[ln]--
+			n++
+		}
+	}
+	return n
 }
 
 func applyRenameResult(s *graph.Snapshot, old, dest, content, mode string, alreadyAtDest bool) {
+	oldVID, destVID := vid(old), vid(dest)
+	oldID := hex.EncodeToString(oldVID[:])
+	destID := hex.EncodeToString(destVID[:])
 	if !alreadyAtDest {
 		removeFileAtPath(s, old)
 	}
 	setFileAtPath(s, dest, content, mode)
+	if oldID != destID {
+		retargetIncident(s, oldID, destID)
+	}
+}
+
+// mergeMode is the ordinary three-way rule on a scalar attribute: take the
+// one-sided change, accept an identical two-sided change, conflict if both
+// sides diverged.
+func mergeMode(base, left, right string) (string, bool) {
+	switch {
+	case left == right:
+		return left, true
+	case left == base:
+		return right, true
+	case right == base:
+		return left, true
+	default:
+		return "", false
+	}
+}
+
+// sideMode is the mode that side presents for the file: the destination if
+// it renamed, otherwise the old path.
+func sideMode(s graph.Snapshot, old, dest string, renamed bool) string {
+	if renamed {
+		if m := fileModeAt(s, dest); m != "" {
+			return m
+		}
+	}
+	return fileModeAt(s, old)
 }
 
 func fileModeAt(s graph.Snapshot, path string) string {
@@ -214,6 +345,12 @@ func setFileAtPath(s *graph.Snapshot, path, content, mode string) {
 	idx := fileVertexIndex(*s)
 	if i, ok := idx[path]; ok {
 		setContent(&s.Vertices[i], content)
+		if mode != "" {
+			if s.Vertices[i].Attrs == nil {
+				s.Vertices[i].Attrs = graph.AttrMap{}
+			}
+			s.Vertices[i].Attrs[fileModeAttr] = mode
+		}
 		return
 	}
 	attrs := graph.AttrMap{
@@ -239,4 +376,46 @@ func removeFileAtPath(s *graph.Snapshot, path string) {
 		return
 	}
 	s.Vertices = append(s.Vertices[:i], s.Vertices[i+1:]...)
+}
+
+// retargetIncident rewrites edges and hyperedges that still name fromID so
+// they name toID. Dropping the old file vertex without this leaves dangling
+// endpoints that Snapshot.Build/Validate reject.
+func retargetIncident(s *graph.Snapshot, fromID, toID string) {
+	if fromID == toID {
+		return
+	}
+	seen := make(map[string]bool, len(s.Edges))
+	edges := make([]graph.EdgeSnapshot, 0, len(s.Edges))
+	for _, e := range s.Edges {
+		if e.From == fromID {
+			e.From = toID
+		}
+		if e.To == fromID {
+			e.To = toID
+		}
+		key := e.Type + "\x00" + e.From + "\x00" + e.To
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		edges = append(edges, e)
+	}
+	s.Edges = edges
+
+	rewrite := func(ids []string) []string {
+		out := make([]string, len(ids))
+		for i, id := range ids {
+			if id == fromID {
+				out[i] = toID
+			} else {
+				out[i] = id
+			}
+		}
+		return out
+	}
+	for i := range s.Hyperedges {
+		s.Hyperedges[i].Inputs = rewrite(s.Hyperedges[i].Inputs)
+		s.Hyperedges[i].Outputs = rewrite(s.Hyperedges[i].Outputs)
+	}
 }

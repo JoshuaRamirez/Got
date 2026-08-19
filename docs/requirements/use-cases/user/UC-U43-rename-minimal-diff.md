@@ -69,16 +69,21 @@
   (UC-U42), then hunk refinement, then rename pairing. Each layer only
   accepts a result the next gate will still validate. `--ours`/`--theirs`
   still resolve genuine remaining conflicts.
-- **Similarity:** a rename matches only when `LCS(lines) / max(n, m)` is at
-  least 0.60 and the pair is each side's unique best. Empty files are never
-  matched. Destination collision (the new path already exists on the other
-  side as a different file) is refused.
+- **Similarity:** a rename matches only when `shared / max(n, m)` is at
+  least 3/5 and the pair is each side's unique best (compared as integers
+  so 3/5 and 6/10 tie). Empty files are never matched. Destination
+  collision (the new path already exists on the other side as a different
+  file) is refused. Pairs whose line-count product exceeds 2e6 are scored
+  by bag-of-lines overlap instead of LCS so scoring stays linear-memory.
 
 ## Known limitations (honest scope)
 
 - **Not a git-identical rename detector:** there is no copy detection, no
   basename-weighted scoring, and no directory-as-a-unit move. Ties and
   sub-threshold pairs are left as delete+add.
+- **Large-file scoring:** when `n×m > 2e6` lines, similarity is bag-of-lines
+  overlap (reorder-insensitive; can score a reshuffle higher than LCS).
+  Diff3's merge-time LCS is unchanged and still quadratic-memory per file.
 - **Same-point divergent inserts still conflict:** two different insertions
   at the same base index overlap as competing inserts.
 - **LCS mis-alignment:** repeated identical lines can align the wrong
