@@ -37,9 +37,11 @@
 
 ### Failure paths
 
-- **2c. Overlapping change:** both sides change the same or adjacent lines
-  differently — a conflict, exactly as git reports (resolvable with
-  `merge --ours`/`--theirs`, UC-U32).
+- **2c. Overlapping change:** both sides change the same lines differently —
+  a conflict, exactly as git reports (resolvable with `merge --ours`/`--theirs`,
+  UC-U32). Adjacent but non-overlapping edits (an insertion immediately next
+  to the other side's edit) are refined by UC-U43 rather than left as a
+  conflict here.
 - **3a. Invalid result:** a line merge that would produce invalid Go (e.g. a
   duplicate declaration) is refused by the gate.
 
@@ -52,12 +54,15 @@
 
 ## Known limitations (honest scope)
 
-- **Adjacent changes conflict:** like git's diff3, changes in the same region
-  (an insertion immediately next to the other side's edit) conflict rather than
-  merge — there is no minimal-diff refinement or rename/move detection.
+- **Adjacent changes and renames:** coarse diff3 still treats an insertion
+  immediately next to the other side's edit as one conflict region, and it
+  does not pair a path change with an edit of the old path. UC-U43 closes
+  both: hunk refinement of non-overlapping adjacent edits, and
+  similarity-based rename/move detection. Remaining limits live in UC-U43.
 
 ## Related use cases
 
 - Extends: UC-U36 (chunk merge), UC-U41 (intra-function merge — diff3 covers the
-  insert/delete cases positional keying cannot). Uses: UC-U40 (semantic gate
+  insert/delete cases positional keying cannot). Extended by: UC-U43 (adjacent
+  hunk refinement and rename detection). Uses: UC-U40 (semantic gate
   still validates the result), UC-U32 (`--ours`/`--theirs`).

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/joshuaramirez/got/internal/repo"
 )
 
 // runCLI invokes run with a fresh state directory rooted at t.TempDir via the
@@ -1997,5 +1999,138 @@ func TestDiff3FallbackIntraFunctionInsert(t *testing.T) {
 	m := readFile(t, "out/m.go")
 	if !strings.Contains(m, "ins := 9") || !strings.Contains(m, "d := 400") || !goValidityOK(m) {
 		t.Fatalf("both changes should survive and be valid:\n%s", m)
+	}
+}
+
+// --- adjacent-edit refinement + rename detection (UC-U43) ---
+
+// dropFileVertex removes a file Artifact from the working graph so a subsequent
+// commit records a path deletion (Got has no `rm` verb; rename is delete+add).
+func dropFileVertex(t *testing.T, path string) {
+	t.Helper()
+	state, err := loadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := removeVertexAndEdges(state.Graph(), vid(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveState(repo.NewState(g, state.Namespace())); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An insertion immediately next to the other side's edit — the case coarse
+// diff3 (UC-U42) left as a conflict — now merges.
+func TestMinimalDiffAdjacentInsertVsEdit(t *testing.T) {
+	initRepoInDir(t)
+	base := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "notes.txt", base)
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "notes.txt", "l1\nINS\nl2\nl3\nl4\nl5\n")
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "insert before l2", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "notes.txt", "l1\nL2\nl3\nl4\nl5\n")
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "edit l2", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("adjacent insert vs edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if got := readFile(t, "out/notes.txt"); got != "l1\nINS\nL2\nl3\nl4\nl5\n" {
+		t.Fatalf("adjacent merge: %q", got)
+	}
+}
+
+// Same-region overlapping edits still conflict; --ours still resolves them.
+func TestMinimalDiffOverlappingStillConflicts(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "notes.txt", "l1\nl2\nl3\n")
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "notes.txt", "l1\nX\nl3\n")
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "A", "--actor", "t")
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "notes.txt", "l1\nY\nl3\n")
+	runCLI(t, "add", "notes.txt")
+	runCLI(t, "commit", "-m", "B", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("overlapping line edit must conflict, got clean: %q", out)
+	}
+	if code, _, errs := runCLI(t, "merge", "--ours", "featA"); code != 0 {
+		t.Fatalf("merge --ours should resolve: %s", errs)
+	}
+	runCLI(t, "extract", "out")
+	if got := readFile(t, "out/notes.txt"); got != "l1\nY\nl3\n" {
+		t.Fatalf("--ours should keep our Y, got %q", got)
+	}
+}
+
+// A file renamed on one side and edited on the other merges at the new path.
+func TestRenamePlusEditMergesAtNewPath(t *testing.T) {
+	initRepoInDir(t)
+	base := "package p\n\nfunc A() int { return 1 }\n\nfunc B() int { return 2 }\n"
+	writeFile(t, "old.go", base)
+	runCLI(t, "add", "old.go")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "new.go", base)
+	runCLI(t, "add", "new.go")
+	dropFileVertex(t, "old.go")
+	runCLI(t, "commit", "-m", "rename old→new", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	edited := "package p\n\nfunc A() int { return 1 }\n\nfunc B() int { return 20 }\n"
+	writeFile(t, "old.go", edited)
+	runCLI(t, "add", "old.go")
+	runCLI(t, "commit", "-m", "edit B", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("rename+edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if _, err := os.Stat("out/old.go"); err == nil {
+		t.Fatal("old path should be gone after a detected rename")
+	}
+	got := readFile(t, "out/new.go")
+	if !strings.Contains(got, "func A()") || !strings.Contains(got, "return 20") || !goValidityOK(got) {
+		t.Fatalf("merged file at new path:\n%s", got)
+	}
+}
+
+// An unrelated delete+add is not a rename; the concurrent edit stays a conflict.
+func TestUnrelatedDeleteAddDoesNotMatch(t *testing.T) {
+	initRepoInDir(t)
+	base := "alpha\nbravo\ncharlie\ndelta\necho\n"
+	writeFile(t, "old.txt", base)
+	runCLI(t, "add", "old.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "other.txt", "zzzz\nyyyy\nxxxx\nwwww\nvvvv\n")
+	runCLI(t, "add", "other.txt")
+	dropFileVertex(t, "old.txt")
+	runCLI(t, "commit", "-m", "replace with unrelated", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "old.txt", "alpha\nBRAVO\ncharlie\ndelta\necho\n")
+	runCLI(t, "add", "old.txt")
+	runCLI(t, "commit", "-m", "edit old", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("unrelated delete+add must not dissolve the edit, got clean: %q", out)
 	}
 }

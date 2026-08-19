@@ -32,6 +32,18 @@ func TestDiff3(t *testing.T) {
 	if got, ok := merge("a\nb\nc\nd\n", "a\nINS\nb\nc\nd\n", "a\nb\nc\nD\n"); !ok || got != "a\nINS\nb\nc\nD\n" {
 		t.Fatalf("insert + distant edit: ok=%v got=%q", ok, got)
 	}
+	// UC-U43: insertion immediately next to the other side's edit — coarse
+	// diff3 lumps these into one gap; hunk refinement must merge them.
+	if got, ok := merge("a\nb\nc\n", "a\nINS\nb\nc\n", "a\nB\nc\n"); !ok || got != "a\nINS\nB\nc\n" {
+		t.Fatalf("adjacent insert vs edit: ok=%v got=%q", ok, got)
+	}
+	if got, ok := merge("a\nb\n", "A\nb\n", "a\nINS\nb\n"); !ok || got != "A\nINS\nb\n" {
+		t.Fatalf("adjacent edit vs insert: ok=%v got=%q", ok, got)
+	}
+	// Same-point divergent inserts still conflict.
+	if _, ok := merge("a\nc\n", "a\nX\nc\n", "a\nY\nc\n"); ok {
+		t.Fatal("divergent inserts at the same point must conflict")
+	}
 	// Deletion on one side, unchanged on the other → deletion applied.
 	if got, ok := merge("a\nb\nc\n", "a\nc\n", "a\nb\nc\n"); !ok || got != "a\nc\n" {
 		t.Fatalf("one-sided delete: ok=%v got=%q", ok, got)

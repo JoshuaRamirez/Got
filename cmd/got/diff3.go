@@ -8,6 +8,10 @@ import "strings"
 // where the structural chunker is coarser than a textual merge (e.g. a statement
 // inserted on one side while another is edited) — while the structural and
 // semantic gates still validate the result.
+//
+// UC-U43 refines a remaining conflict region with pairwise hunks so an
+// insertion immediately next to the other side's edit merges when the hunks
+// do not share a base line. Overlapping edits still conflict.
 
 // diff3 three-way merges line slices against a common base. It returns the merged
 // lines and ok == true when every change region is non-conflicting (one side
@@ -53,8 +57,9 @@ func diff3(base, left, right []string) ([]string, bool) {
 }
 
 // resolveGap reconciles one region between two anchors: if a side is unchanged
-// from base, take the other; if both changed identically, take it; otherwise it
-// is a genuine conflict.
+// from base, take the other; if both changed identically, take it; otherwise
+// refine the region by pairwise hunks so adjacent but non-overlapping edits
+// (an insertion immediately next to the other side's change) can still merge.
 func resolveGap(base, left, right []string) ([]string, bool) {
 	switch {
 	case equalLines(left, base):
@@ -64,8 +69,120 @@ func resolveGap(base, left, right []string) ([]string, bool) {
 	case equalLines(left, right):
 		return left, true
 	default:
-		return nil, false
+		return refineGap(base, left, right)
 	}
+}
+
+// A hunk is one contiguous pairwise edit: base[a1:a2] is replaced by side[s1:s2].
+// An insertion is an empty base range [i,i); a deletion is an empty side range.
+type hunk struct {
+	a1, a2 int
+	s1, s2 int
+}
+
+// refineGap merges a coarse diff3 conflict region by applying pairwise hunks
+// whose base ranges do not overlap. Overlapping hunks still conflict unless
+// both sides made the identical replacement. This is the UC-U43 minimal-diff
+// refinement: never silently join two edits of the same base line.
+func refineGap(base, left, right []string) ([]string, bool) {
+	return mergeHunks(base, left, right, diffHunks(base, left), diffHunks(base, right))
+}
+
+// diffHunks returns the LCS-based edit hunks that turn base into side.
+func diffHunks(base, side []string) []hunk {
+	match := lcsMatch(base, side)
+	var hunks []hunk
+	bi, si := 0, 0
+	for bi < len(base) || si < len(side) {
+		if s, ok := match[bi]; ok && s == si {
+			bi++
+			si++
+			continue
+		}
+		a1, s1 := bi, si
+		for bi < len(base) {
+			if _, ok := match[bi]; ok {
+				break
+			}
+			bi++
+		}
+		s2 := len(side)
+		if bi < len(base) {
+			s2 = match[bi]
+		}
+		si = s2
+		if a1 != bi || s1 != si {
+			hunks = append(hunks, hunk{a1: a1, a2: bi, s1: s1, s2: si})
+		}
+	}
+	return hunks
+}
+
+// mergeHunks walks base, emitting unchanged spans and applying non-overlapping
+// left/right hunks. An insertion at index i does not overlap a replacement of
+// [i,j); two different insertions at the same index do.
+func mergeHunks(base, left, right []string, lh, rh []hunk) ([]string, bool) {
+	var out []string
+	li, ri, pos := 0, 0, 0
+	for li < len(lh) || ri < len(rh) {
+		var l, r *hunk
+		if li < len(lh) {
+			l = &lh[li]
+		}
+		if ri < len(rh) {
+			r = &rh[ri]
+		}
+		next := len(base)
+		if l != nil && l.a1 < next {
+			next = l.a1
+		}
+		if r != nil && r.a1 < next {
+			next = r.a1
+		}
+		out = append(out, base[pos:next]...)
+		pos = next
+
+		switch {
+		case l != nil && r != nil && hunksOverlap(*l, *r):
+			if l.a1 == r.a1 && l.a2 == r.a2 && equalLines(left[l.s1:l.s2], right[r.s1:r.s2]) {
+				out = append(out, left[l.s1:l.s2]...)
+				pos = l.a2
+				li++
+				ri++
+				continue
+			}
+			return nil, false
+		case l != nil && r != nil && l.a1 == r.a1:
+			// Same index, no overlap: one side inserts, the other replaces.
+			if l.a1 == l.a2 {
+				out = append(out, left[l.s1:l.s2]...)
+				li++
+				continue
+			}
+			out = append(out, right[r.s1:r.s2]...)
+			ri++
+			continue
+		case l != nil && (r == nil || l.a1 < r.a1):
+			out = append(out, left[l.s1:l.s2]...)
+			pos = l.a2
+			li++
+		default:
+			out = append(out, right[r.s1:r.s2]...)
+			pos = r.a2
+			ri++
+		}
+	}
+	out = append(out, base[pos:]...)
+	return out, true
+}
+
+// hunksOverlap reports whether two half-open base ranges share a line, or are
+// competing insertions at the same index.
+func hunksOverlap(a, b hunk) bool {
+	if a.a1 == a.a2 && b.a1 == b.a2 {
+		return a.a1 == b.a1
+	}
+	return a.a1 < b.a2 && b.a1 < a.a2
 }
 
 // lcsMatch returns, for each index in a, the index in b it aligns to under a
