@@ -93,7 +93,8 @@
   similar path is added is not paired. Copies stay as independent adds.
 - **Directory mapping follows immediate parents:** a flatten or a
   one-level re-nest that does not preserve `parent/basename` is UC-U45,
-  not this use case. Deeper or arbitrary tree reshapes still need a
+  not this use case. Prefix replacement and N-level re-nest are UC-U46.
+  Arbitrary reshapes that are not a unique prefix strip+add still need a
   unique per-file match.
 - **Near-miss floor is 1/2:** a same-basename pair below 50% content
   similarity is refused even if a human would call it the same file.
@@ -105,5 +106,5 @@
 
 - Extends: UC-U43 (content-similarity rename pairing — this weights
   basename and adds directory-as-a-unit mapping). Extended by: UC-U45
-  (flatten / one-level re-nest). Uses: UC-U40 (semantic gate), UC-U32
-  (`--ours`/`--theirs`).
+  (flatten / one-level re-nest), UC-U46 (prefix replacement / N-level
+  re-nest). Uses: UC-U40 (semantic gate), UC-U32 (`--ours`/`--theirs`).

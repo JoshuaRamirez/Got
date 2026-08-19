@@ -2407,3 +2407,135 @@ func TestAmbiguousFlattenRenestSplitDoesNotRename(t *testing.T) {
 		t.Fatalf("ambiguous flatten/re-nest split must not dissolve the edit, got clean: %q", out)
 	}
 }
+
+// --- prefix replacement / N-level re-nest (UC-U46) ---
+
+// An N-level re-nest carries the other side's edit to the new nested path.
+func TestNLevelRenestPlusEditMergesAtNewPath(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/sub/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "vendor/lib/pkg/a.txt", ident)
+	writeFile(t, "vendor/lib/pkg/sub/b.txt", ident)
+	writeFile(t, "vendor/lib/pkg/c.txt", ident)
+	writeFile(t, "extra/a.txt", ident)
+	runCLI(t, "add", "vendor/lib/pkg/a.txt", "vendor/lib/pkg/sub/b.txt", "vendor/lib/pkg/c.txt", "extra/a.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/sub/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	runCLI(t, "commit", "-m", "re-nest pkg under vendor/lib", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", edited)
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("N-level re-nest+edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if _, err := os.Stat("out/pkg/a.txt"); err == nil {
+		t.Fatal("old tree should be gone after an N-level re-nest")
+	}
+	if got := readFile(t, "out/vendor/lib/pkg/a.txt"); got != edited {
+		t.Fatalf("edit should merge at N-level re-nested path: %q", got)
+	}
+	if got := readFile(t, "out/vendor/lib/pkg/sub/b.txt"); got != ident {
+		t.Fatalf("nested N-level file should follow the tree: %q", got)
+	}
+	if got := readFile(t, "out/extra/a.txt"); got != ident {
+		t.Fatalf("competing same-basename add should remain a one-sided add: %q", got)
+	}
+}
+
+// A prefix replacement carries the other side's edit to the new path.
+func TestPrefixReplacePlusEditMergesAtNewPath(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/sub/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "lib/a.txt", ident)
+	writeFile(t, "lib/sub/b.txt", ident)
+	writeFile(t, "lib/c.txt", ident)
+	writeFile(t, "extra/a.txt", ident)
+	runCLI(t, "add", "lib/a.txt", "lib/sub/b.txt", "lib/c.txt", "extra/a.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/sub/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	runCLI(t, "commit", "-m", "replace pkg with lib", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", edited)
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("prefix-replace+edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if _, err := os.Stat("out/pkg/a.txt"); err == nil {
+		t.Fatal("old tree should be gone after a prefix replacement")
+	}
+	if got := readFile(t, "out/lib/a.txt"); got != edited {
+		t.Fatalf("edit should merge at prefix-replaced path: %q", got)
+	}
+	if got := readFile(t, "out/lib/sub/b.txt"); got != ident {
+		t.Fatalf("nested prefix-replaced file should follow the tree: %q", got)
+	}
+	if got := readFile(t, "out/extra/a.txt"); got != ident {
+		t.Fatalf("competing same-basename add should remain a one-sided add: %q", got)
+	}
+}
+
+// A prefix-replace vs N-level re-nest split is not a tree rename.
+func TestAmbiguousPrefixReplaceSplitDoesNotRename(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/sub/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	writeFile(t, "pkg/d.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt", "pkg/d.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "lib/a.txt", ident)
+	writeFile(t, "extra/a.txt", ident)
+	writeFile(t, "lib/sub/b.txt", ident)
+	writeFile(t, "extra/b.txt", ident)
+	writeFile(t, "vendor/lib/pkg/c.txt", ident)
+	writeFile(t, "extra/c.txt", ident)
+	writeFile(t, "vendor/lib/pkg/d.txt", ident)
+	writeFile(t, "extra/d.txt", ident)
+	runCLI(t, "add", "lib/a.txt", "extra/a.txt", "lib/sub/b.txt", "extra/b.txt", "vendor/lib/pkg/c.txt", "extra/c.txt", "vendor/lib/pkg/d.txt", "extra/d.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/sub/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	dropFileVertex(t, "pkg/d.txt")
+	runCLI(t, "commit", "-m", "split prefix-replace/N-level", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "pkg/a.txt", "l1\nl2\nL3\nl4\nl5\n")
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("ambiguous prefix-replace split must not dissolve the edit, got clean: %q", out)
+	}
+}

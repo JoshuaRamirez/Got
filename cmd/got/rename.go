@@ -28,15 +28,16 @@ const (
 // (n+1)×(m+1) matrix. Diff3's merge-time lcsMatch is unchanged.
 const renameLCSMaxWork = 2_000_000
 
-// reconcileRenames is the UC-U43/U44/U45 path-identity pre-pass. After
+// reconcileRenames is the UC-U43/U44/U45/U46 path-identity pre-pass. After
 // same-path chunk/diff3 reconciliation, it pairs a base path that
 // disappeared on one side with a path that side added, when the contents
 // are similar enough to be the same file (UC-U44: basename-weighted, then
-// directory-as-a-unit; UC-U45: flatten / one-level re-nest). A unique
-// match runs the ordinary content merge (structural, then diff3, then hunk
-// refinement) and rewrites both sides so the merged file sits at the new
-// path. Low-similarity delete+add pairs, combined-score ties, and
-// ambiguous directory splits are left alone — never silently joined.
+// directory-as-a-unit; UC-U45: flatten / one-level re-nest; UC-U46:
+// prefix replacement / N-level re-nest). A unique match runs the ordinary
+// content merge (structural, then diff3, then hunk refinement) and
+// rewrites both sides so the merged file sits at the new path.
+// Low-similarity delete+add pairs, combined-score ties, and ambiguous
+// directory splits are left alone — never silently joined.
 func reconcileRenames(base, left, right graph.Snapshot) (graph.Snapshot, graph.Snapshot) {
 	bC := fileContentByPath(base)
 	lC := fileContentByPath(left)
@@ -122,8 +123,8 @@ func reconcileRenames(base, left, right graph.Snapshot) (graph.Snapshot, graph.S
 // matchRenames returns oldPath → newPath for delete+add pairs that are each
 // other's unique best match at or above the 3/5 combined-similarity
 // threshold (content plus a same-basename bonus). Unmatched files in a
-// unique-majority directory move, flatten, or one-level re-nest are then
-// paired by the recovered path mapping.
+// unique-majority directory move, flatten, re-nest, or prefix replacement
+// are then paired by the recovered path mapping.
 func matchRenames(base, side map[string]string) map[string]string {
 	deleted, added := fileDeleteAdds(base, side)
 	if len(deleted) == 0 || len(added) == 0 {
@@ -153,7 +154,7 @@ func fileDeleteAdds(base, side map[string]string) (deleted, added []string) {
 }
 
 // matchPerFile is the unique-best 1–1 pairing used as `taken` before
-// directory / flatten / re-nest mapping.
+// directory / flatten / re-nest / prefix-replacement mapping.
 func matchPerFile(base, side map[string]string, deleted, added []string) map[string]string {
 	bestNew := make(map[string]string, len(deleted))
 	for _, d := range deleted {
@@ -254,9 +255,9 @@ func uniqueBest(oldPath, target string, cands []string, content func(string) str
 }
 
 // matchDirRenames pairs unmatched delete+add files that follow a unique
-// majority directory move (UC-U44: immediate parent → dest parent), a
-// flatten (common source prefix dropped), or a one-level re-nest (one
-// extra dest parent on every dest). Root-level files are ignored. A
+// majority directory move (UC-U44: immediate parent → dest parent) or a
+// unique prefix strip+add (UC-U45 flatten / one-level re-nest; UC-U46
+// prefix replacement / N-level re-nest). Root-level files are ignored. A
 // destination already taken by per-file matching, or proposed by two
 // unmatched olds, is refused. Each proposed pair still has to meet the
 // combined similarity gate.
@@ -367,17 +368,17 @@ func matchDirRenames(base, side map[string]string, deleted, added []string, take
 }
 
 const (
-	flattenXform = "flatten"
+	replaceXform = "replace:"
 	renestXform  = "renest:"
 )
 
 // matchFlattenRenest pairs unmatched delete+add files that follow a unique
-// flatten (dest is the path with a common source prefix dropped) or a
-// one-level re-nest (dest is one extra parent plus the original path).
-// Votes come from already-matched pairs and from unmatched files with a
-// unique unused basename among adds. Unique strict majority only; a split
-// does not invent a winner. Root-only trees and single-file prefixes stay
-// on per-file matching.
+// prefix strip+add: dest = join(newPrefix, rel(old, oldPrefix)). Flatten
+// is newPrefix empty; a pure re-nest is oldPrefix empty (one or more extra
+// dest parents). Votes come from already-matched pairs and from unmatched
+// files with a unique unused basename among adds. Unique strict majority
+// only; a split does not invent a winner. Root-only trees and single-file
+// prefixes stay on per-file matching.
 func matchFlattenRenest(base, side map[string]string, deleted, added []string, taken map[string]string) map[string]string {
 	usedDest := make(map[string]bool, len(taken))
 	matchedOld := make(map[string]bool, len(taken))
@@ -412,13 +413,22 @@ func matchFlattenRenest(base, side map[string]string, deleted, added []string, t
 		if !ok {
 			continue
 		}
-		if pref, ok := flattenPrefix(d, dest); ok {
-			addVote(pref, flattenXform)
+		oldP, newP, ok := stripAdd(d, dest)
+		if !ok {
+			continue
 		}
-		if extra, ok := oneLevelRenestExtra(d, dest); ok {
-			for _, pref := range pathPrefixes(d) {
-				addVote(pref, renestXform+extra)
-			}
+		if oldP != "" {
+			// Flatten (newP empty) or prefix replacement (both non-empty).
+			addVote(oldP, replaceXform+newP)
+			continue
+		}
+		// Pure re-nest: dest = newP + "/" + old. Vote the extra against
+		// every source prefix (same grouping as UC-U45 one-level).
+		if newP == "" {
+			continue
+		}
+		for _, pref := range pathPrefixes(d) {
+			addVote(pref, renestXform+newP)
 		}
 	}
 
@@ -550,49 +560,42 @@ func relToPrefix(p, prefix string) (string, bool) {
 	return rel, true
 }
 
-// flattenPrefix reports the source prefix dropped when dest is old with
-// that prefix removed. The prefix must be non-empty (root-only files are
-// not a flatten).
-func flattenPrefix(old, dest string) (string, bool) {
-	if dest == "" || dest == old {
-		return "", false
+// stripAdd recovers the unique prefix replacement that maps old → dest:
+// dest = join(newPrefix, rel(old, oldPrefix)), using the longest common
+// path-component suffix. Flatten is newPrefix empty; a pure re-nest is
+// oldPrefix empty. The basename must match (otherwise this is not a
+// relative-path prefix map). dest == old is not a rename.
+func stripAdd(old, dest string) (oldPrefix, newPrefix string, ok bool) {
+	if old == "" || dest == "" || old == dest {
+		return "", "", false
 	}
-	suffix := "/" + dest
-	if !strings.HasSuffix(old, suffix) {
-		return "", false
+	o, d := strings.Split(old, "/"), strings.Split(dest, "/")
+	i, j := len(o)-1, len(d)-1
+	if i < 0 || j < 0 || o[i] != d[j] {
+		return "", "", false
 	}
-	prefix := old[:len(old)-len(suffix)]
-	if prefix == "" {
-		return "", false
+	for i >= 0 && j >= 0 && o[i] == d[j] {
+		i--
+		j--
 	}
-	return prefix, true
-}
-
-// oneLevelRenestExtra reports the single extra parent when dest is that
-// parent plus the original path. Two or more extra parents are out of
-// scope.
-func oneLevelRenestExtra(old, dest string) (string, bool) {
-	if old == "" || dest == "" {
-		return "", false
-	}
-	suffix := "/" + old
-	if !strings.HasSuffix(dest, suffix) {
-		return "", false
-	}
-	extra := dest[:len(dest)-len(suffix)]
-	if extra == "" || strings.Contains(extra, "/") {
-		return "", false
-	}
-	return extra, true
+	return strings.Join(o[:i+1], "/"), strings.Join(d[:j+1], "/"), true
 }
 
 func applyPrefixXform(old, pref, key string) (string, bool) {
 	switch {
-	case key == flattenXform:
-		return relToPrefix(old, pref)
+	case strings.HasPrefix(key, replaceXform):
+		rel, ok := relToPrefix(old, pref)
+		if !ok {
+			return "", false
+		}
+		newP := strings.TrimPrefix(key, replaceXform)
+		if newP == "" {
+			return rel, true
+		}
+		return path.Join(newP, rel), true
 	case strings.HasPrefix(key, renestXform):
 		extra := strings.TrimPrefix(key, renestXform)
-		if extra == "" || strings.Contains(extra, "/") {
+		if extra == "" {
 			return "", false
 		}
 		return path.Join(extra, old), true

@@ -86,11 +86,9 @@
 
 - **No copy detection:** a path that remains on the renaming side while a
   similar path is added is not paired. Copies stay as independent adds.
-- **Deeper / arbitrary tree reshapes stay out** unless uniquely
-  recoverable as flatten or one-level re-nest. Two or more extra parents
-  (`pkg/a.go` → `vendor/lib/pkg/a.go`) and prefix replacements that both
-  drop and add (`pkg/a.go` + `pkg/sub/b.go` → `lib/a.go` + `lib/sub/b.go`)
-  still need a unique per-file match.
+- **Deeper prefix replacement and N-level re-nest are UC-U46.** Arbitrary
+  reshapes that are not a unique prefix strip+add still need a unique
+  per-file match.
 - Limits inherited from UC-U43 and UC-U44 still apply (divergent rename
   destinations are not unified; large-file bag overlap is
   reorder-insensitive; same-region overlaps still conflict; near-miss
@@ -99,5 +97,6 @@
 ## Related use cases
 
 - Extends: UC-U44 (basename-weighted scoring and immediate-parent
-  directory mapping — this recovers flatten and one-level re-nest). Uses:
+  directory mapping — this recovers flatten and one-level re-nest).
+  Extended by: UC-U46 (prefix replacement / N-level re-nest). Uses:
   UC-U40 (semantic gate), UC-U32 (`--ours`/`--theirs`).

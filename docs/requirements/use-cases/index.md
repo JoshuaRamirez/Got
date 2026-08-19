@@ -52,6 +52,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U43](user/UC-U43-rename-minimal-diff.md) | Refine adjacent edits and detect renames | Developer | `cmd/got` |
 | [UC-U44](user/UC-U44-basename-dir-rename.md) | Weight basename and detect directory moves | Developer | `cmd/got` |
 | [UC-U45](user/UC-U45-flatten-renest.md) | Flatten and re-nest directory mapping | Developer | `cmd/got` |
+| [UC-U46](user/UC-U46-prefix-replace.md) | Prefix replacement and N-level re-nest | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 

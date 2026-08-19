@@ -5,6 +5,17 @@ For day-by-day session detail see `docs/devlog/`.
 
 ## Unreleased
 
+### Added — prefix replacement / N-level re-nest (UC-U46)
+
+- **Prefix replacement and N-level re-nest** — when a unique strict
+  majority of files under a source prefix land at `join(newPrefix,
+  rel(old, oldPrefix))`, remaining files pair by that mapping so a
+  per-file edit still merges at the new path. Flatten (empty newPrefix)
+  and one-level re-nest (empty oldPrefix, one dest component) stay the
+  UC-U45 special cases. An ambiguous prefix-replace / N-level split is
+  not a tree rename. Copy detection is still out of scope. Arbitrary
+  reshapes that are not a unique prefix strip+add stay out.
+
 ### Added — flatten / re-nest mapping (UC-U45)
 
 - **Flatten and one-level re-nest** — when a unique strict majority of
