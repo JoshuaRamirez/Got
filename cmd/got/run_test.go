@@ -2275,3 +2275,135 @@ func TestAmbiguousDirectorySplitDoesNotRename(t *testing.T) {
 		t.Fatalf("ambiguous directory split must not dissolve the edit, got clean: %q", out)
 	}
 }
+
+// --- flatten / one-level re-nest (UC-U45) ---
+
+// A flattened tree carries the other side's edit to the new (flattened) path.
+func TestFlattenPlusEditMergesAtNewPath(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/sub/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "a.txt", ident)
+	writeFile(t, "sub/b.txt", ident)
+	writeFile(t, "c.txt", ident)
+	writeFile(t, "extra/a.txt", ident)
+	runCLI(t, "add", "a.txt", "sub/b.txt", "c.txt", "extra/a.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/sub/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	runCLI(t, "commit", "-m", "flatten pkg", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", edited)
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("flatten+edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if _, err := os.Stat("out/pkg/a.txt"); err == nil {
+		t.Fatal("old tree should be gone after a flatten")
+	}
+	if got := readFile(t, "out/a.txt"); got != edited {
+		t.Fatalf("edit should merge at flattened path: %q", got)
+	}
+	if got := readFile(t, "out/sub/b.txt"); got != ident {
+		t.Fatalf("nested flatten file should follow the tree: %q", got)
+	}
+	if got := readFile(t, "out/extra/a.txt"); got != ident {
+		t.Fatalf("competing same-basename add should remain a one-sided add: %q", got)
+	}
+}
+
+// A one-level re-nest carries the other side's edit to the new nested path.
+func TestRenestPlusEditMergesAtNewPath(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/sub/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "lib/pkg/a.txt", ident)
+	writeFile(t, "lib/pkg/sub/b.txt", ident)
+	writeFile(t, "lib/pkg/c.txt", ident)
+	writeFile(t, "extra/a.txt", ident)
+	runCLI(t, "add", "lib/pkg/a.txt", "lib/pkg/sub/b.txt", "lib/pkg/c.txt", "extra/a.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/sub/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	runCLI(t, "commit", "-m", "re-nest pkg under lib", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", edited)
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("re-nest+edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if _, err := os.Stat("out/pkg/a.txt"); err == nil {
+		t.Fatal("old tree should be gone after a re-nest")
+	}
+	if got := readFile(t, "out/lib/pkg/a.txt"); got != edited {
+		t.Fatalf("edit should merge at re-nested path: %q", got)
+	}
+	if got := readFile(t, "out/lib/pkg/sub/b.txt"); got != ident {
+		t.Fatalf("nested re-nest file should follow the tree: %q", got)
+	}
+	if got := readFile(t, "out/extra/a.txt"); got != ident {
+		t.Fatalf("competing same-basename add should remain a one-sided add: %q", got)
+	}
+}
+
+// A flatten vs re-nest split is not a tree rename; the concurrent edit stays a conflict.
+func TestAmbiguousFlattenRenestSplitDoesNotRename(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/sub/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	writeFile(t, "pkg/d.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt", "pkg/d.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "a.txt", ident)
+	writeFile(t, "extra/a.txt", ident)
+	writeFile(t, "sub/b.txt", ident)
+	writeFile(t, "extra/b.txt", ident)
+	writeFile(t, "lib/pkg/c.txt", ident)
+	writeFile(t, "extra/c.txt", ident)
+	writeFile(t, "lib/pkg/d.txt", ident)
+	writeFile(t, "extra/d.txt", ident)
+	runCLI(t, "add", "a.txt", "extra/a.txt", "sub/b.txt", "extra/b.txt", "lib/pkg/c.txt", "extra/c.txt", "lib/pkg/d.txt", "extra/d.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/sub/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	dropFileVertex(t, "pkg/d.txt")
+	runCLI(t, "commit", "-m", "split flatten/re-nest", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "pkg/a.txt", "l1\nl2\nL3\nl4\nl5\n")
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("ambiguous flatten/re-nest split must not dissolve the edit, got clean: %q", out)
+	}
+}

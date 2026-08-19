@@ -148,7 +148,7 @@ UC-U04 and UC-U17 stay `Specified` until Phase 4 lands `repo`.
 Verified.**
 
 Since the roadmap was finished, the catalogue has grown well beyond the
-original 37 — `ledger.md` now reads **57/57 Verified**. The additive work
+original 37 — `ledger.md` now reads **72/72 Verified**. The additive work
 falls in two arcs:
 
 1. **Engine hardening / composability** (UC-S21–S25): frontier audit &
@@ -169,6 +169,8 @@ imports only `graph` and `identity` and is consumed by `repo`, slotting
 below `repo` without changing the phase ordering. Everything else extends
 existing packages and the top-level `cmd/got` application, so the
 dependency-ordered phases above are unchanged.
+
+Leftover #75 (flatten / re-nest directory mapping) is UC-U45.
 
 Next work is hardening, new UCs, or composability — see the ledger's
 "Next-bite candidates" section for the options.
