@@ -80,8 +80,8 @@
 
 - **Not a git-identical rename detector:** there is no copy detection.
   Basename-weighted scoring and directory-as-a-unit moves are UC-U44.
-  Remaining ties and sub-threshold pairs (after those refinements) are
-  left as delete+add.
+  Flatten and one-level re-nest mapping are UC-U45. Remaining ties and
+  sub-threshold pairs (after those refinements) are left as delete+add.
 - **Large-file scoring:** when `n×m > 2e6` lines, similarity is bag-of-lines
   overlap (reorder-insensitive; can score a reshuffle higher than LCS).
   Diff3's merge-time LCS is unchanged and still quadratic-memory per file.
@@ -96,5 +96,5 @@
 
 - Extends: UC-U42 (diff3 fallback — this refines the adjacent-conflict and
   missing-rename limits). Extended by: UC-U44 (basename-weighted scoring
-  and directory-as-a-unit move). Uses: UC-U40 (semantic gate), UC-U32
-  (`--ours`/`--theirs`).
+  and directory-as-a-unit move), UC-U45 (flatten / one-level re-nest).
+  Uses: UC-U40 (semantic gate), UC-U32 (`--ours`/`--theirs`).

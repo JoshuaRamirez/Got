@@ -5,6 +5,15 @@ For day-by-day session detail see `docs/devlog/`.
 
 ## Unreleased
 
+### Added — flatten / re-nest mapping (UC-U45)
+
+- **Flatten and one-level re-nest** — when a unique strict majority of
+  files under a source prefix land with that prefix dropped (flatten) or
+  with one extra dest parent on every path (re-nest), remaining files
+  pair by that mapping so a per-file edit still merges at the new path.
+  An ambiguous flatten/re-nest split is not a tree rename. Copy detection
+  is still out of scope.
+
 ### Added — rename refinement (UC-U44)
 
 - **Basename-weighted scoring** — a same-basename path change

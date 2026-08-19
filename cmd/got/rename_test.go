@@ -485,3 +485,184 @@ func TestReconcileDirMoveAmbiguousSplitUnchanged(t *testing.T) {
 		t.Fatal("ambiguous split must not copy the edit onto a guessed dest")
 	}
 }
+
+func TestMatchFlattenTree(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt":     ident,
+		"pkg/sub/b.txt": ident,
+		"pkg/c.txt":     ident,
+	}
+	// extra/a.txt ties basename for a.txt so uniqueBest refuses; flatten
+	// of pkg/ still pairs a.txt → a.txt.
+	side := map[string]string{
+		"a.txt":       ident,
+		"sub/b.txt":   ident,
+		"c.txt":       ident,
+		"extra/a.txt": ident,
+	}
+	got := matchRenames(base, side)
+	if got["pkg/a.txt"] != "a.txt" || got["pkg/sub/b.txt"] != "sub/b.txt" || got["pkg/c.txt"] != "c.txt" {
+		t.Fatalf("flatten should pair by dropped prefix, got %v", got)
+	}
+}
+
+func TestMatchRenestTree(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt":     ident,
+		"pkg/sub/b.txt": ident,
+		"pkg/c.txt":     ident,
+	}
+	side := map[string]string{
+		"lib/pkg/a.txt":     ident,
+		"lib/pkg/sub/b.txt": ident,
+		"lib/pkg/c.txt":     ident,
+		"extra/a.txt":       ident,
+	}
+	got := matchRenames(base, side)
+	if got["pkg/a.txt"] != "lib/pkg/a.txt" || got["pkg/sub/b.txt"] != "lib/pkg/sub/b.txt" || got["pkg/c.txt"] != "lib/pkg/c.txt" {
+		t.Fatalf("one-level re-nest should prepend the extra parent, got %v", got)
+	}
+}
+
+func TestMatchFlattenRenestAmbiguousSplitRefuse(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt":     ident,
+		"pkg/sub/b.txt": ident,
+		"pkg/c.txt":     ident,
+		"pkg/d.txt":     ident,
+	}
+	// Half flatten, half re-nest: no unique majority transform.
+	side := map[string]string{
+		"a.txt":         ident,
+		"sub/b.txt":     ident,
+		"lib/pkg/c.txt": ident,
+		"lib/pkg/d.txt": ident,
+	}
+	got := matchRenames(base, side)
+	if _, ok := got["pkg/a.txt"]; ok {
+		t.Fatalf("flatten/re-nest split must not pair a.txt, got %v", got)
+	}
+}
+
+func TestMatchFlattenLowSimilarityRefuse(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt": tenLineBody(),
+		"pkg/b.txt": ident,
+		"pkg/c.txt": ident,
+	}
+	unrel := "z0\nz1\nz2\nz3\nz4\nz5\nz6\nz7\nz8\nz9\n"
+	side := map[string]string{
+		"a.txt": unrel,
+		"b.txt": ident,
+		"c.txt": ident,
+	}
+	got := matchRenames(base, side)
+	if _, ok := got["pkg/a.txt"]; ok {
+		t.Fatalf("flatten must not pair a low-similarity same-basename dest, got %v", got)
+	}
+	if got["pkg/b.txt"] != "b.txt" || got["pkg/c.txt"] != "c.txt" {
+		t.Fatalf("similar flatten pairs should still match, got %v", got)
+	}
+}
+
+func TestReconcileFlattenEditAtNewPath(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	base := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", ident),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("a.txt", ident),
+		fileVS("sub/b.txt", ident),
+		fileVS("c.txt", ident),
+		fileVS("extra/a.txt", ident),
+	}}
+	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", edited),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+
+	lOut, rOut := reconcileRenames(base, left, right)
+	lC, rC := fileContentByPath(lOut), fileContentByPath(rOut)
+	if _, ok := rC["pkg/a.txt"]; ok {
+		t.Fatal("old path should be dropped on the edit side after a flatten")
+	}
+	if lC["a.txt"] != edited || rC["a.txt"] != edited {
+		t.Fatalf("edit should merge at flattened path: left=%q right=%q", lC["a.txt"], rC["a.txt"])
+	}
+	if lC["sub/b.txt"] != ident || rC["sub/b.txt"] != ident {
+		t.Fatalf("nested flatten file should land at new path, got left=%q right=%q", lC["sub/b.txt"], rC["sub/b.txt"])
+	}
+}
+
+func TestReconcileRenestEditAtNewPath(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	base := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", ident),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("lib/pkg/a.txt", ident),
+		fileVS("lib/pkg/sub/b.txt", ident),
+		fileVS("lib/pkg/c.txt", ident),
+		fileVS("extra/a.txt", ident),
+	}}
+	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", edited),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+
+	lOut, rOut := reconcileRenames(base, left, right)
+	lC, rC := fileContentByPath(lOut), fileContentByPath(rOut)
+	if _, ok := rC["pkg/a.txt"]; ok {
+		t.Fatal("old path should be dropped on the edit side after a re-nest")
+	}
+	if lC["lib/pkg/a.txt"] != edited || rC["lib/pkg/a.txt"] != edited {
+		t.Fatalf("edit should merge at re-nested path: left=%q right=%q", lC["lib/pkg/a.txt"], rC["lib/pkg/a.txt"])
+	}
+	if lC["lib/pkg/sub/b.txt"] != ident || rC["lib/pkg/sub/b.txt"] != ident {
+		t.Fatalf("nested re-nest file should land at new path, got left=%q right=%q", lC["lib/pkg/sub/b.txt"], rC["lib/pkg/sub/b.txt"])
+	}
+}
+
+func TestReconcileFlattenRenestAmbiguousSplitUnchanged(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	base := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", ident),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+		fileVS("pkg/d.txt", ident),
+	}}
+	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("a.txt", ident),
+		fileVS("sub/b.txt", ident),
+		fileVS("lib/pkg/c.txt", ident),
+		fileVS("lib/pkg/d.txt", ident),
+	}}
+	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", edited),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+		fileVS("pkg/d.txt", ident),
+	}}
+
+	_, rOut := reconcileRenames(base, left, right)
+	rC := fileContentByPath(rOut)
+	if rC["pkg/a.txt"] != edited {
+		t.Fatalf("ambiguous flatten/re-nest split must keep the edit at the old path, got %q", rC["pkg/a.txt"])
+	}
+	if _, ok := rC["a.txt"]; ok {
+		t.Fatal("ambiguous split must not copy the edit onto a guessed flatten dest")
+	}
+}
