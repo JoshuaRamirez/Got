@@ -683,6 +683,224 @@ func TestReconcileFlattenRenestAmbiguousSplitUnchanged(t *testing.T) {
 	}
 }
 
+func TestStripAddSpecialCases(t *testing.T) {
+	cases := []struct {
+		old, dest, oldP, newP string
+		ok                    bool
+	}{
+		{"pkg/a.go", "a.go", "pkg", "", true},                       // flatten
+		{"pkg/a.go", "lib/pkg/a.go", "", "lib", true},               // one-level re-nest
+		{"pkg/a.go", "vendor/lib/pkg/a.go", "", "vendor/lib", true}, // N-level re-nest
+		{"pkg/a.go", "lib/a.go", "pkg", "lib", true},                // prefix replacement
+		{"pkg/sub/b.go", "lib/sub/b.go", "pkg", "lib", true},
+		{"pkg/a.go", "pkg/a.go", "", "", false},
+		{"pkg/a.go", "lib/b.go", "", "", false}, // different basename
+	}
+	for _, c := range cases {
+		oldP, newP, ok := stripAdd(c.old, c.dest)
+		if ok != c.ok || oldP != c.oldP || newP != c.newP {
+			t.Fatalf("stripAdd(%q, %q) = (%q, %q, %v), want (%q, %q, %v)",
+				c.old, c.dest, oldP, newP, ok, c.oldP, c.newP, c.ok)
+		}
+	}
+}
+
+func TestMatchNLevelRenestTree(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt":     ident,
+		"pkg/sub/b.txt": ident,
+		"pkg/c.txt":     ident,
+	}
+	side := map[string]string{
+		"vendor/lib/pkg/a.txt":     ident,
+		"vendor/lib/pkg/sub/b.txt": ident,
+		"vendor/lib/pkg/c.txt":     ident,
+		"extra/a.txt":              ident,
+	}
+	got := matchRenames(base, side)
+	if got["pkg/a.txt"] != "vendor/lib/pkg/a.txt" || got["pkg/sub/b.txt"] != "vendor/lib/pkg/sub/b.txt" || got["pkg/c.txt"] != "vendor/lib/pkg/c.txt" {
+		t.Fatalf("N-level re-nest should prepend the extra parents, got %v", got)
+	}
+}
+
+func TestMatchPrefixReplaceTree(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt":     ident,
+		"pkg/sub/b.txt": ident,
+		"pkg/c.txt":     ident,
+	}
+	side := map[string]string{
+		"lib/a.txt":     ident,
+		"lib/sub/b.txt": ident,
+		"lib/c.txt":     ident,
+		"extra/a.txt":   ident,
+	}
+	got := matchRenames(base, side)
+	if got["pkg/a.txt"] != "lib/a.txt" || got["pkg/sub/b.txt"] != "lib/sub/b.txt" || got["pkg/c.txt"] != "lib/c.txt" {
+		t.Fatalf("prefix replacement should drop pkg and add lib, got %v", got)
+	}
+}
+
+func TestMatchPrefixReplaceAmbiguousSplitRefuse(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt":     ident,
+		"pkg/sub/b.txt": ident,
+		"pkg/c.txt":     ident,
+		"pkg/d.txt":     ident,
+	}
+	// Half prefix-replace to lib/, half N-level re-nest under vendor/lib/.
+	// Every file has a competing same-basename dest so uniqueBest refuses
+	// and leftovers reach matchFlattenRenest.
+	side := map[string]string{
+		"lib/a.txt":            ident,
+		"extra/a.txt":          ident,
+		"lib/sub/b.txt":        ident,
+		"extra/b.txt":          ident,
+		"vendor/lib/pkg/c.txt": ident,
+		"extra/c.txt":          ident,
+		"vendor/lib/pkg/d.txt": ident,
+		"extra/d.txt":          ident,
+	}
+	deleted, added := fileDeleteAdds(base, side)
+	taken := matchPerFile(base, side, deleted, added)
+	for _, old := range []string{"pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt", "pkg/d.txt"} {
+		if _, ok := taken[old]; ok {
+			t.Fatalf("per-file uniqueBest must refuse %s (competing dest), taken=%v", old, taken)
+		}
+	}
+	got := matchRenames(base, side)
+	if _, ok := got["pkg/a.txt"]; ok {
+		t.Fatalf("prefix-replace / N-level split must not pair a.txt, got %v", got)
+	}
+}
+
+func TestMatchPrefixReplaceLowSimilarityRefuse(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt": tenLineBody(),
+		"pkg/b.txt": ident,
+		"pkg/c.txt": ident,
+	}
+	unrel := "z0\nz1\nz2\nz3\nz4\nz5\nz6\nz7\nz8\nz9\n"
+	side := map[string]string{
+		"lib/a.txt": unrel,
+		"lib/b.txt": ident,
+		"lib/c.txt": ident,
+	}
+	got := matchRenames(base, side)
+	if _, ok := got["pkg/a.txt"]; ok {
+		t.Fatalf("prefix replacement must not pair a low-similarity same-basename dest, got %v", got)
+	}
+	if got["pkg/b.txt"] != "lib/b.txt" || got["pkg/c.txt"] != "lib/c.txt" {
+		t.Fatalf("similar prefix-replace pairs should still match, got %v", got)
+	}
+}
+
+func TestReconcileNLevelRenestEditAtNewPath(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	base := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", ident),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("vendor/lib/pkg/a.txt", ident),
+		fileVS("vendor/lib/pkg/sub/b.txt", ident),
+		fileVS("vendor/lib/pkg/c.txt", ident),
+		fileVS("extra/a.txt", ident),
+	}}
+	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", edited),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+
+	lOut, rOut := reconcileRenames(base, left, right)
+	lC, rC := fileContentByPath(lOut), fileContentByPath(rOut)
+	if _, ok := rC["pkg/a.txt"]; ok {
+		t.Fatal("old path should be dropped on the edit side after an N-level re-nest")
+	}
+	if lC["vendor/lib/pkg/a.txt"] != edited || rC["vendor/lib/pkg/a.txt"] != edited {
+		t.Fatalf("edit should merge at N-level re-nested path: left=%q right=%q", lC["vendor/lib/pkg/a.txt"], rC["vendor/lib/pkg/a.txt"])
+	}
+	if lC["vendor/lib/pkg/sub/b.txt"] != ident || rC["vendor/lib/pkg/sub/b.txt"] != ident {
+		t.Fatalf("nested N-level file should land at new path, got left=%q right=%q", lC["vendor/lib/pkg/sub/b.txt"], rC["vendor/lib/pkg/sub/b.txt"])
+	}
+}
+
+func TestReconcilePrefixReplaceEditAtNewPath(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	base := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", ident),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("lib/a.txt", ident),
+		fileVS("lib/sub/b.txt", ident),
+		fileVS("lib/c.txt", ident),
+		fileVS("extra/a.txt", ident),
+	}}
+	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", edited),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+	}}
+
+	lOut, rOut := reconcileRenames(base, left, right)
+	lC, rC := fileContentByPath(lOut), fileContentByPath(rOut)
+	if _, ok := rC["pkg/a.txt"]; ok {
+		t.Fatal("old path should be dropped on the edit side after a prefix replacement")
+	}
+	if lC["lib/a.txt"] != edited || rC["lib/a.txt"] != edited {
+		t.Fatalf("edit should merge at prefix-replaced path: left=%q right=%q", lC["lib/a.txt"], rC["lib/a.txt"])
+	}
+	if lC["lib/sub/b.txt"] != ident || rC["lib/sub/b.txt"] != ident {
+		t.Fatalf("nested prefix-replaced file should land at new path, got left=%q right=%q", lC["lib/sub/b.txt"], rC["lib/sub/b.txt"])
+	}
+}
+
+func TestReconcilePrefixReplaceAmbiguousSplitUnchanged(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	base := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", ident),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+		fileVS("pkg/d.txt", ident),
+	}}
+	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("lib/a.txt", ident),
+		fileVS("extra/a.txt", ident),
+		fileVS("lib/sub/b.txt", ident),
+		fileVS("extra/b.txt", ident),
+		fileVS("vendor/lib/pkg/c.txt", ident),
+		fileVS("extra/c.txt", ident),
+		fileVS("vendor/lib/pkg/d.txt", ident),
+		fileVS("extra/d.txt", ident),
+	}}
+	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
+		fileVS("pkg/a.txt", edited),
+		fileVS("pkg/sub/b.txt", ident),
+		fileVS("pkg/c.txt", ident),
+		fileVS("pkg/d.txt", ident),
+	}}
+
+	_, rOut := reconcileRenames(base, left, right)
+	rC := fileContentByPath(rOut)
+	if rC["pkg/a.txt"] != edited {
+		t.Fatalf("ambiguous prefix-replace split must keep the edit at the old path, got %q", rC["pkg/a.txt"])
+	}
+	if _, ok := rC["lib/a.txt"]; ok {
+		t.Fatal("ambiguous split must not copy the edit onto a guessed prefix-replace dest")
+	}
+}
+
 func TestPathPrefixesAbsoluteUnixTerminates(t *testing.T) {
 	got := pathPrefixes("/pkg/a.txt")
 	slash := 0
