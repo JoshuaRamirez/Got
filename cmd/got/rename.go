@@ -220,7 +220,7 @@ func uniqueBest(oldPath, target string, cands []string, content func(string) str
 	tied := false
 	found := false
 	for _, c := range cands {
-		s := renameScore(oldPath, c, lineSimFrac(target, content(c)))
+		s := pairScore(oldPath, c, target, content(c))
 		if !meetsRenameThreshold(s) {
 			continue
 		}
@@ -340,7 +340,7 @@ func matchDirRenames(base, side map[string]string, deleted, added []string, take
 		if usedDest[dest] {
 			continue
 		}
-		s := renameScore(d, dest, lineSimFrac(base[d], side[dest]))
+		s := pairScore(d, dest, base[d], side[dest])
 		if !meetsRenameThreshold(s) {
 			continue
 		}
@@ -365,10 +365,30 @@ func pathParent(p string) string {
 	return d
 }
 
+// pairScore is the path-aware rename score: content similarity with an
+// LCS floor of 1/2 when basenames match (so the 1/10 bonus can still
+// reach 3/5) and 3/5 when they differ (so a different-basename pair that
+// cannot meet the threshold skips LCS).
+func pairScore(oldPath, newPath, a, b string) simFrac {
+	num, den := renameSimNum, renameSimDen
+	if path.Base(oldPath) == path.Base(newPath) {
+		num, den = 1, 2
+	}
+	return renameScore(oldPath, newPath, lineSimFracFloor(a, b, num, den))
+}
+
 // lineSimFrac is shared/max(n,m) for rename scoring. Empty files score 0.
-// Pairs whose n×m product exceeds renameLCSMaxWork use bag-of-lines overlap
-// (linear memory) instead of LCS, so scoring cannot allocate gigabytes.
+// Path-unaware callers use the 1/2 floor (loosest; same as a basename
+// pair). Scoring goes through pairScore instead.
 func lineSimFrac(a, b string) simFrac {
+	return lineSimFracFloor(a, b, 1, 2)
+}
+
+// lineSimFracFloor skips LCS/bag-overlap when even a perfect overlap
+// cannot meet floorNum/floorDen. Pairs whose n×m product exceeds
+// renameLCSMaxWork use bag-of-lines overlap (linear memory) instead of
+// LCS, so scoring cannot allocate gigabytes.
+func lineSimFracFloor(a, b string, floorNum, floorDen int) simFrac {
 	la, lb := splitLinesKeepEOL(a), splitLinesKeepEOL(b)
 	n, m := len(la), len(lb)
 	if n == 0 || m == 0 {
@@ -378,9 +398,7 @@ func lineSimFrac(a, b string) simFrac {
 	if m > n {
 		maxLen, minLen = m, n
 	}
-	// Even a perfect LCS plus the 1/10 basename bonus cannot reach 3/5
-	// unless min/max ≥ 1/2. Skip the LCS in that case.
-	if minLen*2 < maxLen {
+	if floorDen <= 0 || int64(minLen)*int64(floorDen) < int64(maxLen)*int64(floorNum) {
 		return simFrac{0, maxLen}
 	}
 	var shared int

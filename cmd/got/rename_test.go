@@ -329,6 +329,27 @@ func TestMatchRenamesBasenameNearMiss(t *testing.T) {
 	}
 }
 
+func TestDifferentBasenameBelowThresholdSkipsLCS(t *testing.T) {
+	// 5 lines vs 10: min/max = 1/2. Different-basename floor is 3/5, so
+	// even a perfect overlap cannot meet the threshold — skip LCS.
+	short, long := "l0\nl1\nl2\nl3\nl4\n", tenLineBody()
+	s := lineSimFracFloor(short, long, renameSimNum, renameSimDen)
+	if s.shared != 0 || s.maxLen != 10 {
+		t.Fatalf("different-basename pair with min/max < 3/5 must skip LCS, got %+v", s)
+	}
+	if meetsRenameThreshold(pairScore("src/foo.go", "pkg/bar.go", short, long)) {
+		t.Fatal("different-basename 1/2 content must still refuse")
+	}
+	// Same-basename floor is 1/2: still run LCS so the near-miss can match.
+	same := lineSimFracFloor(short, long, 1, 2)
+	if same.shared != 5 {
+		t.Fatalf("same-basename near-miss must still run LCS, got %+v", same)
+	}
+	if !meetsRenameThreshold(pairScore("src/foo.go", "pkg/foo.go", short, long)) {
+		t.Fatal("same-basename 1/2 content must still meet 3/5")
+	}
+}
+
 func TestMatchRenamesLowSimilaritySameBasenameRefuse(t *testing.T) {
 	base := map[string]string{"src/foo.go": tenLineBody()}
 	unrel := "z0\nz1\nz2\nz3\nz4\nz5\nz6\nz7\nz8\nz9\n"

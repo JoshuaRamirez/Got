@@ -15,7 +15,8 @@ For day-by-day session detail see `docs/devlog/`.
   under a base directory land under one new directory, remaining files
   pair by relative path so a per-file edit still merges at the new tree.
   An ambiguous split is not a tree rename. Copy detection is still out of
-  scope.
+  scope. Review of #74: `pairScore` skips LCS when even a perfect overlap
+  cannot meet the path-aware floor (1/2 if same basename, 3/5 otherwise).
 
 ### Added — merge refinement (UC-U43)
 

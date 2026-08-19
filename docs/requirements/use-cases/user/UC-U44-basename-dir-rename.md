@@ -77,8 +77,9 @@
   plus 1/10 when `path.Base` matches (uncapped, so a same-basename 1.0
   beats a different-basename 1.0). Threshold remains 3/5, so a
   same-basename pair needs content ≥ 1/2. Different-basename pairs still
-  need content ≥ 3/5. Empty files are never matched. Ties on the combined
-  score still refuse.
+  need content ≥ 3/5. LCS is skipped when even a perfect overlap cannot
+  meet that floor (`pairScore`: 1/2 if basenames match, 3/5 otherwise).
+  Empty files are never matched. Ties on the combined score still refuse.
 - **Directory mapping:** only non-root parents; at least two deleted files
   from that parent; unique destination with `votes > n/2`. Destination
   collision (two olds proposing the same new path, or a dest already taken
