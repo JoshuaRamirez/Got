@@ -47,9 +47,10 @@
   at least 1/2, the added path uniquely shares the basename, and the
   combined score meets 3/5 — treated as a rename.
 - **3a. Directory move plus edit:** most files under a base directory land
-  under one new directory (preserving relative names). Identical contents
-  that would tie as per-file candidates pair by relative path; an edit of
-  one file on the other side merges at the new path.
+  under one new directory (preserving relative names). A file whose
+  per-file match ties — typically a competing same-basename add — follows
+  the majority dest; an edit of that file on the other side merges at the
+  new path.
 
 ### Failure paths
 

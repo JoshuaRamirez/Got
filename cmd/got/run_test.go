@@ -2209,7 +2209,8 @@ func TestDirectoryMovePlusEditMergesAtNewPath(t *testing.T) {
 	writeFile(t, "lib/a.txt", ident)
 	writeFile(t, "lib/b.txt", ident)
 	writeFile(t, "lib/c.txt", ident)
-	runCLI(t, "add", "lib/a.txt", "lib/b.txt", "lib/c.txt")
+	writeFile(t, "extra/a.txt", ident)
+	runCLI(t, "add", "lib/a.txt", "lib/b.txt", "lib/c.txt", "extra/a.txt")
 	dropFileVertex(t, "pkg/a.txt")
 	dropFileVertex(t, "pkg/b.txt")
 	dropFileVertex(t, "pkg/c.txt")
@@ -2235,6 +2236,9 @@ func TestDirectoryMovePlusEditMergesAtNewPath(t *testing.T) {
 	if got := readFile(t, "out/lib/b.txt"); got != ident {
 		t.Fatalf("unedited file should follow the tree: %q", got)
 	}
+	if got := readFile(t, "out/extra/a.txt"); got != ident {
+		t.Fatalf("competing same-basename add should remain a one-sided add: %q", got)
+	}
 }
 
 // A 50/50 directory split is not a tree rename; the concurrent edit stays a conflict.
@@ -2251,9 +2255,10 @@ func TestAmbiguousDirectorySplitDoesNotRename(t *testing.T) {
 	runCLI(t, "checkout", "-b", "featA")
 	writeFile(t, "d1/a.txt", ident)
 	writeFile(t, "d1/b.txt", ident)
+	writeFile(t, "d2/a.txt", ident)
 	writeFile(t, "d2/c.txt", ident)
 	writeFile(t, "d2/d.txt", ident)
-	runCLI(t, "add", "d1/a.txt", "d1/b.txt", "d2/c.txt", "d2/d.txt")
+	runCLI(t, "add", "d1/a.txt", "d1/b.txt", "d2/a.txt", "d2/c.txt", "d2/d.txt")
 	dropFileVertex(t, "pkg/a.txt")
 	dropFileVertex(t, "pkg/b.txt")
 	dropFileVertex(t, "pkg/c.txt")

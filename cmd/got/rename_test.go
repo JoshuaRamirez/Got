@@ -355,6 +355,27 @@ func TestMatchDirMoveIdenticalFiles(t *testing.T) {
 	}
 }
 
+func TestMatchDirMoveDisambiguatesBasenameTie(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt": ident,
+		"pkg/b.txt": ident,
+		"pkg/c.txt": ident,
+	}
+	// lib/ is the majority dest; extra/a.txt ties basename for a.txt so
+	// per-file uniqueBest refuses, and the directory mapping picks lib/.
+	side := map[string]string{
+		"lib/a.txt":   ident,
+		"lib/b.txt":   ident,
+		"lib/c.txt":   ident,
+		"extra/a.txt": ident,
+	}
+	got := matchRenames(base, side)
+	if got["pkg/a.txt"] != "lib/a.txt" || got["pkg/b.txt"] != "lib/b.txt" || got["pkg/c.txt"] != "lib/c.txt" {
+		t.Fatalf("majority directory move should break the a.txt basename tie, got %v", got)
+	}
+}
+
 func TestMatchDirMoveAmbiguousSplitRefuse(t *testing.T) {
 	ident := "l1\nl2\nl3\nl4\nl5\n"
 	base := map[string]string{
@@ -363,14 +384,18 @@ func TestMatchDirMoveAmbiguousSplitRefuse(t *testing.T) {
 		"pkg/c.txt": ident,
 		"pkg/d.txt": ident,
 	}
+	// 50/50 split plus a competing a.txt dest: per-file uniqueBest ties on
+	// a.txt, and the tree has no unique majority, so a.txt stays unmatched.
 	side := map[string]string{
 		"d1/a.txt": ident,
 		"d1/b.txt": ident,
+		"d2/a.txt": ident,
 		"d2/c.txt": ident,
 		"d2/d.txt": ident,
 	}
-	if m := matchRenames(base, side); len(m) != 0 {
-		t.Fatalf("50/50 directory split must not be a tree rename: %v", m)
+	got := matchRenames(base, side)
+	if _, ok := got["pkg/a.txt"]; ok {
+		t.Fatalf("ambiguous split must not pair a.txt, got %v", got)
 	}
 }
 
@@ -386,6 +411,7 @@ func TestReconcileDirMoveEditAtNewPath(t *testing.T) {
 		fileVS("lib/a.txt", ident),
 		fileVS("lib/b.txt", ident),
 		fileVS("lib/c.txt", ident),
+		fileVS("extra/a.txt", ident),
 	}}
 	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
 		fileVS("pkg/a.txt", edited),
@@ -418,6 +444,7 @@ func TestReconcileDirMoveAmbiguousSplitUnchanged(t *testing.T) {
 	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
 		fileVS("d1/a.txt", ident),
 		fileVS("d1/b.txt", ident),
+		fileVS("d2/a.txt", ident),
 		fileVS("d2/c.txt", ident),
 		fileVS("d2/d.txt", ident),
 	}}
