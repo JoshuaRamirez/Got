@@ -75,7 +75,9 @@ func reconcileFilesByChunk(base, left, right graph.Snapshot) (graph.Snapshot, gr
 		setContent(&leftOut.Vertices[li], merged)
 		setContent(&rightOut.Vertices[ri], merged)
 	}
-	return leftOut, rightOut
+	// UC-U43: pair a path deleted on one side with a similar added path so a
+	// rename+edit is a content merge at the new path, not a delete+add.
+	return reconcileRenames(base, leftOut, rightOut)
 }
 
 // chunkMerge is the structural (symbol/declaration-aware) merge. It is applied

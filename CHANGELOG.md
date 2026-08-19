@@ -5,6 +5,17 @@ For day-by-day session detail see `docs/devlog/`.
 
 ## Unreleased
 
+### Added — merge refinement (UC-U43)
+
+- **Minimal-diff refinement** — a coarse diff3 conflict region is re-merged
+  from pairwise LCS hunks so an insertion immediately next to the other
+  side's edit applies when the hunks do not share a base line. Same-region
+  overlaps and same-point divergent inserts still conflict.
+- **Rename/move detection** — a path deleted on one side is paired with a
+  unique-best added path at ≥60% line-LCS similarity; the content merge
+  (structural, then diff3, then hunk refinement) is stored at the new path.
+  Unrelated delete+add and ambiguous ties are not matched.
+
 ### Added — hardening
 
 - **`graph.Builder`** — O(n) bulk graph construction. ~100x faster than

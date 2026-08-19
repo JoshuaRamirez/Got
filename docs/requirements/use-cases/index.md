@@ -49,6 +49,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U40](user/UC-U40-semantic-merge-gate.md) | Refuse a merge that does not type-check | Developer | `cmd/got` |
 | [UC-U41](user/UC-U41-intra-function-merge.md) | Merge disjoint edits within one function | Developer | `cmd/got` |
 | [UC-U42](user/UC-U42-diff3-fallback.md) | Fall back to a line-level merge | Developer | `cmd/got` |
+| [UC-U43](user/UC-U43-rename-minimal-diff.md) | Refine adjacent edits and detect renames | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 
