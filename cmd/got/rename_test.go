@@ -534,14 +534,24 @@ func TestMatchFlattenRenestAmbiguousSplitRefuse(t *testing.T) {
 		"pkg/c.txt":     ident,
 		"pkg/d.txt":     ident,
 	}
-	// Half flatten, half re-nest, plus a competing a.txt dest so per-file
-	// uniqueBest ties. No unique majority transform.
+	// Half flatten, half re-nest. Every file has a competing same-basename
+	// dest so uniqueBest refuses and leftovers reach matchFlattenRenest.
 	side := map[string]string{
 		"a.txt":         ident,
 		"extra/a.txt":   ident,
 		"sub/b.txt":     ident,
+		"extra/b.txt":   ident,
 		"lib/pkg/c.txt": ident,
+		"extra/c.txt":   ident,
 		"lib/pkg/d.txt": ident,
+		"extra/d.txt":   ident,
+	}
+	deleted, added := fileDeleteAdds(base, side)
+	taken := matchPerFile(base, side, deleted, added)
+	for _, old := range []string{"pkg/a.txt", "pkg/sub/b.txt", "pkg/c.txt", "pkg/d.txt"} {
+		if _, ok := taken[old]; ok {
+			t.Fatalf("per-file uniqueBest must refuse %s (competing dest), taken=%v", old, taken)
+		}
 	}
 	got := matchRenames(base, side)
 	if _, ok := got["pkg/a.txt"]; ok {
@@ -650,8 +660,11 @@ func TestReconcileFlattenRenestAmbiguousSplitUnchanged(t *testing.T) {
 		fileVS("a.txt", ident),
 		fileVS("extra/a.txt", ident),
 		fileVS("sub/b.txt", ident),
+		fileVS("extra/b.txt", ident),
 		fileVS("lib/pkg/c.txt", ident),
+		fileVS("extra/c.txt", ident),
 		fileVS("lib/pkg/d.txt", ident),
+		fileVS("extra/d.txt", ident),
 	}}
 	right := graph.Snapshot{Vertices: []graph.VertexSnapshot{
 		fileVS("pkg/a.txt", edited),
@@ -667,5 +680,24 @@ func TestReconcileFlattenRenestAmbiguousSplitUnchanged(t *testing.T) {
 	}
 	if _, ok := rC["a.txt"]; ok {
 		t.Fatal("ambiguous split must not copy the edit onto a guessed flatten dest")
+	}
+}
+
+func TestPathPrefixesAbsoluteUnixTerminates(t *testing.T) {
+	got := pathPrefixes("/pkg/a.txt")
+	slash := 0
+	for _, p := range got {
+		if p == "/" {
+			slash++
+		}
+	}
+	if slash > 1 {
+		t.Fatalf("must include / at most once, got %v", got)
+	}
+	if slash != 1 {
+		t.Fatalf("absolute path must reach /, got %v", got)
+	}
+	if got[0] != "/pkg" {
+		t.Fatalf("first prefix should be /pkg, got %v", got)
 	}
 }

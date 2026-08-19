@@ -125,7 +125,18 @@ func reconcileRenames(base, left, right graph.Snapshot) (graph.Snapshot, graph.S
 // unique-majority directory move, flatten, or one-level re-nest are then
 // paired by the recovered path mapping.
 func matchRenames(base, side map[string]string) map[string]string {
-	var deleted, added []string
+	deleted, added := fileDeleteAdds(base, side)
+	if len(deleted) == 0 || len(added) == 0 {
+		return nil
+	}
+	out := matchPerFile(base, side, deleted, added)
+	for d, a := range matchDirRenames(base, side, deleted, added, out) {
+		out[d] = a
+	}
+	return out
+}
+
+func fileDeleteAdds(base, side map[string]string) (deleted, added []string) {
 	for p := range base {
 		if _, ok := side[p]; !ok {
 			deleted = append(deleted, p)
@@ -138,10 +149,12 @@ func matchRenames(base, side map[string]string) map[string]string {
 	}
 	sort.Strings(deleted)
 	sort.Strings(added)
-	if len(deleted) == 0 || len(added) == 0 {
-		return nil
-	}
+	return deleted, added
+}
 
+// matchPerFile is the unique-best 1–1 pairing used as `taken` before
+// directory / flatten / re-nest mapping.
+func matchPerFile(base, side map[string]string, deleted, added []string) map[string]string {
 	bestNew := make(map[string]string, len(deleted))
 	for _, d := range deleted {
 		p, ok := uniqueBest(d, base[d], added, func(p string) string { return side[p] })
@@ -156,15 +169,11 @@ func matchRenames(base, side map[string]string) map[string]string {
 			bestOld[a] = p
 		}
 	}
-
 	out := make(map[string]string)
 	for d, a := range bestNew {
 		if bestOld[a] == d {
 			out[d] = a
 		}
-	}
-	for d, a := range matchDirRenames(base, side, deleted, added, out) {
-		out[d] = a
 	}
 	return out
 }
@@ -279,30 +288,14 @@ func matchDirRenames(base, side map[string]string, deleted, added []string, take
 		m[dst]++
 	}
 
+	byBase := uniqueUnusedByBase(added, usedDest)
 	for _, d := range deleted {
 		src := pathParent(d)
 		if src == "" {
 			continue
 		}
-		if a, ok := taken[d]; ok {
-			addVote(src, pathParent(a))
-			continue
-		}
-		var hit string
-		n := 0
-		b := path.Base(d)
-		for _, a := range added {
-			if usedDest[a] || path.Base(a) != b {
-				continue
-			}
-			n++
-			hit = a
-			if n > 1 {
-				break
-			}
-		}
-		if n == 1 {
-			addVote(src, pathParent(hit))
+		if dest, ok := voteDest(d, taken, byBase); ok {
+			addVote(src, pathParent(dest))
 		}
 	}
 
@@ -413,8 +406,9 @@ func matchFlattenRenest(base, side map[string]string, deleted, added []string, t
 		m[key]++
 	}
 
+	byBase := uniqueUnusedByBase(added, usedDest)
 	for _, d := range deleted {
-		dest, ok := voteDest(d, taken, added, usedDest)
+		dest, ok := voteDest(d, taken, byBase)
 		if !ok {
 			continue
 		}
@@ -498,37 +492,45 @@ func matchFlattenRenest(base, side map[string]string, deleted, added []string, t
 	return out
 }
 
-func voteDest(d string, taken map[string]string, added []string, usedDest map[string]bool) (string, bool) {
+// uniqueUnusedByBase maps basename → added path when exactly one unused
+// added path has that basename. Ambiguous names are omitted.
+func uniqueUnusedByBase(added []string, usedDest map[string]bool) map[string]string {
+	count := make(map[string]int, len(added))
+	hit := make(map[string]string, len(added))
+	for _, a := range added {
+		if usedDest[a] {
+			continue
+		}
+		b := path.Base(a)
+		count[b]++
+		hit[b] = a
+	}
+	out := make(map[string]string, len(count))
+	for b, n := range count {
+		if n == 1 {
+			out[b] = hit[b]
+		}
+	}
+	return out
+}
+
+func voteDest(d string, taken, byBase map[string]string) (string, bool) {
 	if a, ok := taken[d]; ok {
 		return a, true
 	}
-	var hit string
-	n := 0
-	b := path.Base(d)
-	for _, a := range added {
-		if usedDest[a] || path.Base(a) != b {
-			continue
-		}
-		n++
-		hit = a
-		if n > 1 {
-			return "", false
-		}
-	}
-	if n == 1 {
-		return hit, true
-	}
-	return "", false
+	a, ok := byBase[path.Base(d)]
+	return a, ok
 }
 
 func pathPrefixes(p string) []string {
 	var out []string
 	for {
-		p = pathParent(p)
-		if p == "" {
+		next := pathParent(p)
+		if next == "" || next == p {
 			break
 		}
-		out = append(out, p)
+		out = append(out, next)
+		p = next
 	}
 	return out
 }

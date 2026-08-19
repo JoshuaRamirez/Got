@@ -12,7 +12,10 @@ For day-by-day session detail see `docs/devlog/`.
   with one extra dest parent on every path (re-nest), remaining files
   pair by that mapping so a per-file edit still merges at the new path.
   An ambiguous flatten/re-nest split is not a tree rename. Copy detection
-  is still out of scope.
+  is still out of scope. Review of #76: ambiguous-split fixtures compete
+  every basename so leftovers reach `matchFlattenRenest`; `pathPrefixes`
+  stops when the parent equals the path (absolute `/`); unused adds are
+  indexed by basename once for `voteDest`.
 
 ### Added — rename refinement (UC-U44)
 
