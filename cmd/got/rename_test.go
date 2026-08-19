@@ -534,9 +534,11 @@ func TestMatchFlattenRenestAmbiguousSplitRefuse(t *testing.T) {
 		"pkg/c.txt":     ident,
 		"pkg/d.txt":     ident,
 	}
-	// Half flatten, half re-nest: no unique majority transform.
+	// Half flatten, half re-nest, plus a competing a.txt dest so per-file
+	// uniqueBest ties. No unique majority transform.
 	side := map[string]string{
 		"a.txt":         ident,
+		"extra/a.txt":   ident,
 		"sub/b.txt":     ident,
 		"lib/pkg/c.txt": ident,
 		"lib/pkg/d.txt": ident,
@@ -646,6 +648,7 @@ func TestReconcileFlattenRenestAmbiguousSplitUnchanged(t *testing.T) {
 	}}
 	left := graph.Snapshot{Vertices: []graph.VertexSnapshot{
 		fileVS("a.txt", ident),
+		fileVS("extra/a.txt", ident),
 		fileVS("sub/b.txt", ident),
 		fileVS("lib/pkg/c.txt", ident),
 		fileVS("lib/pkg/d.txt", ident),

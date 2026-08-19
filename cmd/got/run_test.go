@@ -2383,10 +2383,11 @@ func TestAmbiguousFlattenRenestSplitDoesNotRename(t *testing.T) {
 
 	runCLI(t, "checkout", "-b", "featA")
 	writeFile(t, "a.txt", ident)
+	writeFile(t, "extra/a.txt", ident)
 	writeFile(t, "sub/b.txt", ident)
 	writeFile(t, "lib/pkg/c.txt", ident)
 	writeFile(t, "lib/pkg/d.txt", ident)
-	runCLI(t, "add", "a.txt", "sub/b.txt", "lib/pkg/c.txt", "lib/pkg/d.txt")
+	runCLI(t, "add", "a.txt", "extra/a.txt", "sub/b.txt", "lib/pkg/c.txt", "lib/pkg/d.txt")
 	dropFileVertex(t, "pkg/a.txt")
 	dropFileVertex(t, "pkg/sub/b.txt")
 	dropFileVertex(t, "pkg/c.txt")
