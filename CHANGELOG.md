@@ -5,6 +5,18 @@ For day-by-day session detail see `docs/devlog/`.
 
 ## Unreleased
 
+### Added — rename refinement (UC-U44)
+
+- **Basename-weighted scoring** — a same-basename path change
+  (`src/foo.go` → `pkg/foo.go`) uniquely matches when content similarity
+  would tie or sit just under 3/5. Combined score is content plus 1/10
+  when `path.Base` matches; low-similarity same-name pairs still refuse.
+- **Directory-as-a-unit move** — when a unique strict majority of files
+  under a base directory land under one new directory, remaining files
+  pair by relative path so a per-file edit still merges at the new tree.
+  An ambiguous split is not a tree rename. Copy detection is still out of
+  scope.
+
 ### Added — merge refinement (UC-U43)
 
 - **Minimal-diff refinement** — a coarse diff3 conflict region is re-merged

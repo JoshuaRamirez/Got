@@ -2134,3 +2134,139 @@ func TestUnrelatedDeleteAddDoesNotMatch(t *testing.T) {
 		t.Fatalf("unrelated delete+add must not dissolve the edit, got clean: %q", out)
 	}
 }
+
+// --- basename-weighted rename + directory move (UC-U44) ---
+
+// Same-basename dest uniquely matches when a competing add would tie on content.
+func TestBasenameWeightedRenamePlusEdit(t *testing.T) {
+	initRepoInDir(t)
+	base := "alpha\nbravo\ncharlie\ndelta\necho\n"
+	writeFile(t, "src/foo.txt", base)
+	runCLI(t, "add", "src/foo.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "pkg/foo.txt", base)
+	writeFile(t, "pkg/bar.txt", base)
+	runCLI(t, "add", "pkg/foo.txt", "pkg/bar.txt")
+	dropFileVertex(t, "src/foo.txt")
+	runCLI(t, "commit", "-m", "move foo + extra similar add", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	edited := "alpha\nBRAVO\ncharlie\ndelta\necho\n"
+	writeFile(t, "src/foo.txt", edited)
+	runCLI(t, "add", "src/foo.txt")
+	runCLI(t, "commit", "-m", "edit foo", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("same-basename unique match should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if _, err := os.Stat("out/src/foo.txt"); err == nil {
+		t.Fatal("old path should be gone after a basename-weighted rename")
+	}
+	if got := readFile(t, "out/pkg/foo.txt"); got != edited {
+		t.Fatalf("merged file at new path: %q", got)
+	}
+}
+
+// Same basename with unrelated content is not a rename.
+func TestLowSimilaritySameBasenameDoesNotMatch(t *testing.T) {
+	initRepoInDir(t)
+	writeFile(t, "src/foo.txt", "alpha\nbravo\ncharlie\ndelta\necho\n")
+	runCLI(t, "add", "src/foo.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "pkg/foo.txt", "zzzz\nyyyy\nxxxx\nwwww\nvvvv\n")
+	runCLI(t, "add", "pkg/foo.txt")
+	dropFileVertex(t, "src/foo.txt")
+	runCLI(t, "commit", "-m", "unrelated same name", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "src/foo.txt", "alpha\nBRAVO\ncharlie\ndelta\necho\n")
+	runCLI(t, "add", "src/foo.txt")
+	runCLI(t, "commit", "-m", "edit foo", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("low-similarity same basename must not match, got clean: %q", out)
+	}
+}
+
+// A directory moved as a unit carries the other side's edit to the new path.
+func TestDirectoryMovePlusEditMergesAtNewPath(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/b.txt", "pkg/c.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "lib/a.txt", ident)
+	writeFile(t, "lib/b.txt", ident)
+	writeFile(t, "lib/c.txt", ident)
+	runCLI(t, "add", "lib/a.txt", "lib/b.txt", "lib/c.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	runCLI(t, "commit", "-m", "mv pkg lib", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	edited := "l1\nl2\nL3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", edited)
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, errs := runCLI(t, "merge", "featA"); code != 0 {
+		t.Fatalf("directory move+edit should merge: code=%d out=%q err=%q", code, out, errs)
+	}
+	runCLI(t, "extract", "out")
+	if _, err := os.Stat("out/pkg/a.txt"); err == nil {
+		t.Fatal("old tree should be gone after a directory move")
+	}
+	if got := readFile(t, "out/lib/a.txt"); got != edited {
+		t.Fatalf("edit should merge at new path: %q", got)
+	}
+	if got := readFile(t, "out/lib/b.txt"); got != ident {
+		t.Fatalf("unedited file should follow the tree: %q", got)
+	}
+}
+
+// A 50/50 directory split is not a tree rename; the concurrent edit stays a conflict.
+func TestAmbiguousDirectorySplitDoesNotRename(t *testing.T) {
+	initRepoInDir(t)
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	writeFile(t, "pkg/a.txt", ident)
+	writeFile(t, "pkg/b.txt", ident)
+	writeFile(t, "pkg/c.txt", ident)
+	writeFile(t, "pkg/d.txt", ident)
+	runCLI(t, "add", "pkg/a.txt", "pkg/b.txt", "pkg/c.txt", "pkg/d.txt")
+	runCLI(t, "commit", "-m", "base", "--actor", "t")
+
+	runCLI(t, "checkout", "-b", "featA")
+	writeFile(t, "d1/a.txt", ident)
+	writeFile(t, "d1/b.txt", ident)
+	writeFile(t, "d2/c.txt", ident)
+	writeFile(t, "d2/d.txt", ident)
+	runCLI(t, "add", "d1/a.txt", "d1/b.txt", "d2/c.txt", "d2/d.txt")
+	dropFileVertex(t, "pkg/a.txt")
+	dropFileVertex(t, "pkg/b.txt")
+	dropFileVertex(t, "pkg/c.txt")
+	dropFileVertex(t, "pkg/d.txt")
+	runCLI(t, "commit", "-m", "split pkg", "--actor", "t")
+
+	runCLI(t, "checkout", "main")
+	runCLI(t, "checkout", "-b", "featB")
+	writeFile(t, "pkg/a.txt", "l1\nl2\nL3\nl4\nl5\n")
+	runCLI(t, "add", "pkg/a.txt")
+	runCLI(t, "commit", "-m", "edit a", "--actor", "t")
+
+	if code, out, _ := runCLI(t, "merge", "featA"); code == 0 {
+		t.Fatalf("ambiguous directory split must not dissolve the edit, got clean: %q", out)
+	}
+}

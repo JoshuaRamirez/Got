@@ -50,6 +50,7 @@ Stable IDs. Do not renumber. Retired entries keep their ID and gain a
 | [UC-U41](user/UC-U41-intra-function-merge.md) | Merge disjoint edits within one function | Developer | `cmd/got` |
 | [UC-U42](user/UC-U42-diff3-fallback.md) | Fall back to a line-level merge | Developer | `cmd/got` |
 | [UC-U43](user/UC-U43-rename-minimal-diff.md) | Refine adjacent edits and detect renames | Developer | `cmd/got` |
+| [UC-U44](user/UC-U44-basename-dir-rename.md) | Weight basename and detect directory moves | Developer | `cmd/got` |
 
 ## System use cases (sub-function level)
 

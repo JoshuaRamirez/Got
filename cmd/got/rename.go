@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"path"
 	"sort"
 
 	"github.com/joshuaramirez/got/internal/graph"
@@ -11,10 +12,13 @@ import (
 
 // Rename similarity is shared/max(n,m) ≥ 3/5. Conservative relative to git's
 // default 50%. Compared as integers (cross-multiply) so equal rationals with
-// different denominators still tie.
+// different denominators still tie. UC-U44 adds a 1/10 basename bonus, so a
+// same-basename pair meets 3/5 once content is ≥ 1/2.
 const (
-	renameSimNum = 3
-	renameSimDen = 5
+	renameSimNum           = 3
+	renameSimDen           = 5
+	renameBasenameBonusNum = 1
+	renameBasenameBonusDen = 10
 )
 
 // renameLCSMaxWork is the maximum n×m line-count product for which rename
@@ -23,13 +27,14 @@ const (
 // (n+1)×(m+1) matrix. Diff3's merge-time lcsMatch is unchanged.
 const renameLCSMaxWork = 2_000_000
 
-// reconcileRenames is the UC-U43 path-identity pre-pass. After same-path
+// reconcileRenames is the UC-U43/U44 path-identity pre-pass. After same-path
 // chunk/diff3 reconciliation, it pairs a base path that disappeared on one
 // side with a path that side added, when the contents are similar enough to
-// be the same file. A unique match runs the ordinary content merge
-// (structural, then diff3, then hunk refinement) and rewrites both sides so
-// the merged file sits at the new path. Low-similarity delete+add pairs and
-// ambiguous ties are left alone — never silently joined.
+// be the same file (UC-U44: basename-weighted, then directory-as-a-unit).
+// A unique match runs the ordinary content merge (structural, then diff3,
+// then hunk refinement) and rewrites both sides so the merged file sits at
+// the new path. Low-similarity delete+add pairs, combined-score ties, and
+// ambiguous directory splits are left alone — never silently joined.
 func reconcileRenames(base, left, right graph.Snapshot) (graph.Snapshot, graph.Snapshot) {
 	bC := fileContentByPath(base)
 	lC := fileContentByPath(left)
@@ -113,7 +118,9 @@ func reconcileRenames(base, left, right graph.Snapshot) (graph.Snapshot, graph.S
 }
 
 // matchRenames returns oldPath → newPath for delete+add pairs that are each
-// other's unique best match at or above the 3/5 similarity threshold.
+// other's unique best match at or above the 3/5 combined-similarity
+// threshold (content plus a same-basename bonus). Unmatched files in a
+// unique-majority directory move are then paired by relative path.
 func matchRenames(base, side map[string]string) map[string]string {
 	var deleted, added []string
 	for p := range base {
@@ -134,14 +141,14 @@ func matchRenames(base, side map[string]string) map[string]string {
 
 	bestNew := make(map[string]string, len(deleted))
 	for _, d := range deleted {
-		p, ok := uniqueBest(base[d], added, func(p string) string { return side[p] })
+		p, ok := uniqueBest(d, base[d], added, func(p string) string { return side[p] })
 		if ok {
 			bestNew[d] = p
 		}
 	}
 	bestOld := make(map[string]string, len(added))
 	for _, a := range added {
-		p, ok := uniqueBest(side[a], deleted, func(p string) string { return base[p] })
+		p, ok := uniqueBest(a, side[a], deleted, func(p string) string { return base[p] })
 		if ok {
 			bestOld[a] = p
 		}
@@ -152,6 +159,9 @@ func matchRenames(base, side map[string]string) map[string]string {
 		if bestOld[a] == d {
 			out[d] = a
 		}
+	}
+	for d, a := range matchDirRenames(base, side, deleted, added, out) {
+		out[d] = a
 	}
 	return out
 }
@@ -184,15 +194,33 @@ func meetsRenameThreshold(s simFrac) bool {
 	return int64(s.shared)*int64(renameSimDen) >= int64(s.maxLen)*int64(renameSimNum)
 }
 
+// renameScore is content similarity plus a 1/10 bonus when the paths share
+// a basename. Uncapped so a same-basename 1.0 beats a different-basename
+// 1.0 rather than tying at the cap. Combined with the 3/5 threshold, a
+// same-basename pair still needs content ≥ 1/2 — a low-similarity
+// same-name pair cannot sneak through on the bonus alone.
+func renameScore(oldPath, newPath string, content simFrac) simFrac {
+	if content.maxLen <= 0 {
+		return content
+	}
+	if path.Base(oldPath) != path.Base(newPath) {
+		return content
+	}
+	shared := renameBasenameBonusDen*content.shared + renameBasenameBonusNum*content.maxLen
+	maxLen := renameBasenameBonusDen * content.maxLen
+	return simFrac{shared, maxLen}
+}
+
 // uniqueBest returns the unique highest-scoring candidate at or above the
-// rename threshold. A tie for first place is not a match.
-func uniqueBest(target string, cands []string, content func(string) string) (string, bool) {
+// rename threshold (content plus basename bonus). A tie for first place is
+// not a match.
+func uniqueBest(oldPath, target string, cands []string, content func(string) string) (string, bool) {
 	var best string
 	var bestScore simFrac
 	tied := false
 	found := false
 	for _, c := range cands {
-		s := lineSimFrac(target, content(c))
+		s := renameScore(oldPath, c, lineSimFrac(target, content(c)))
 		if !meetsRenameThreshold(s) {
 			continue
 		}
@@ -213,6 +241,130 @@ func uniqueBest(target string, cands []string, content func(string) string) (str
 	return best, true
 }
 
+// matchDirRenames pairs unmatched delete+add files that follow a unique
+// majority directory move. Immediate parents only; root-level files are
+// ignored. A destination already taken by per-file matching, or proposed
+// by two unmatched olds, is refused. Each proposed pair still has to meet
+// the combined similarity gate.
+func matchDirRenames(base, side map[string]string, deleted, added []string, taken map[string]string) map[string]string {
+	usedDest := make(map[string]bool, len(taken))
+	matchedOld := make(map[string]bool, len(taken))
+	for d, a := range taken {
+		usedDest[a] = true
+		matchedOld[d] = true
+	}
+
+	srcCount := map[string]int{}
+	for _, d := range deleted {
+		if p := pathParent(d); p != "" {
+			srcCount[p]++
+		}
+	}
+
+	votes := map[string]map[string]int{}
+	addVote := func(src, dst string) {
+		if src == "" || dst == "" || src == dst {
+			return
+		}
+		m := votes[src]
+		if m == nil {
+			m = map[string]int{}
+			votes[src] = m
+		}
+		m[dst]++
+	}
+
+	for _, d := range deleted {
+		src := pathParent(d)
+		if src == "" {
+			continue
+		}
+		if a, ok := taken[d]; ok {
+			addVote(src, pathParent(a))
+			continue
+		}
+		var hit string
+		n := 0
+		b := path.Base(d)
+		for _, a := range added {
+			if usedDest[a] || path.Base(a) != b {
+				continue
+			}
+			n++
+			hit = a
+			if n > 1 {
+				break
+			}
+		}
+		if n == 1 {
+			addVote(src, pathParent(hit))
+		}
+	}
+
+	mapping := map[string]string{}
+	for src, n := range srcCount {
+		if n < 2 {
+			continue
+		}
+		best, bestN := "", 0
+		tied := false
+		for dst, c := range votes[src] {
+			if c > bestN {
+				best, bestN, tied = dst, c, false
+			} else if c == bestN {
+				tied = true
+			}
+		}
+		if tied || best == "" || bestN*2 <= n {
+			continue
+		}
+		mapping[src] = best
+	}
+
+	proposed := map[string][]string{} // dest → olds
+	for _, d := range deleted {
+		if matchedOld[d] {
+			continue
+		}
+		dstDir, ok := mapping[pathParent(d)]
+		if !ok {
+			continue
+		}
+		dest := path.Join(dstDir, path.Base(d))
+		if _, ok := side[dest]; !ok {
+			continue
+		}
+		if _, inBase := base[dest]; inBase {
+			continue
+		}
+		if usedDest[dest] {
+			continue
+		}
+		s := renameScore(d, dest, lineSimFrac(base[d], side[dest]))
+		if !meetsRenameThreshold(s) {
+			continue
+		}
+		proposed[dest] = append(proposed[dest], d)
+	}
+
+	out := map[string]string{}
+	for dest, olds := range proposed {
+		if len(olds) != 1 {
+			continue
+		}
+		out[olds[0]] = dest
+	}
+	return out
+}
+
+func pathParent(p string) string {
+	d := path.Dir(p)
+	if d == "." {
+		return ""
+	}
+	return d
+}
+
 // lineSimFrac is shared/max(n,m) for rename scoring. Empty files score 0.
 // Pairs whose n×m product exceeds renameLCSMaxWork use bag-of-lines overlap
 // (linear memory) instead of LCS, so scoring cannot allocate gigabytes.
@@ -226,7 +378,9 @@ func lineSimFrac(a, b string) simFrac {
 	if m > n {
 		maxLen, minLen = m, n
 	}
-	if int64(minLen)*int64(renameSimDen) < int64(maxLen)*int64(renameSimNum) {
+	// Even a perfect LCS plus the 1/10 basename bonus cannot reach 3/5
+	// unless min/max ≥ 1/2. Skip the LCS in that case.
+	if minLen*2 < maxLen {
 		return simFrac{0, maxLen}
 	}
 	var shared int
