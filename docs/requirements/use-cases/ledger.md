@@ -150,7 +150,9 @@ success path and at least one failure path per extension group.
 The roadmap is complete. Subsequent work is either:
 
 - **Hardening** — additional failure-path tests, fuzz testing, race
-  testing under load, benchmarks.
+  testing under load, benchmarks. Leftover #79 is `cmd/got` rename-matcher
+  fuzz (seeds only; same pattern as `internal/graph` and
+  `internal/identity`). Copy detection stays out.
 - **New UCs** — add new requirements via `/use-case new`; they enter the
   catalogue at `Specified` and follow the same lifecycle.
 - **Composability** — concrete materializers for non-manifest targets,

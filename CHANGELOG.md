@@ -5,6 +5,18 @@ For day-by-day session detail see `docs/devlog/`.
 
 ## Unreleased
 
+### Added — hardening
+
+- **Rename-matcher fuzz tests** — `cmd/got/rename_fuzz_test.go` seeds the
+  UC-U43–U46 fixtures (including competing same-basename dests so leftovers
+  reach `matchFlattenRenest`) and asserts existing matcher invariants on
+  random trees: a path that remains on the renaming side is never paired,
+  a pair below the combined 3/5 gate is not a rename, empty files are
+  never matched, combined-score ties refuse, `pathPrefixes` terminates on
+  `/`, and a split with no unique strict majority does not invent a
+  flatten / re-nest / prefix map. Copy detection stays out. Seeds run as
+  ordinary tests (no long-running `go test -fuzz` CI job). (#79)
+
 ### Added — prefix replacement / N-level re-nest (UC-U46)
 
 - **Prefix replacement and N-level re-nest** — when a unique strict
