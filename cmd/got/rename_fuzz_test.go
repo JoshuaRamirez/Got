@@ -109,6 +109,29 @@ func TestRenameFuzzSeedCorpus(t *testing.T) {
 	}
 }
 
+func TestLeftoverOraclePerGroup(t *testing.T) {
+	ident := "l1\nl2\nl3\nl4\nl5\n"
+	base := map[string]string{
+		"pkg/a.txt": ident, "pkg/b.txt": ident, "pkg/c.txt": ident,
+		"other/x.txt": ident, "other/y.txt": ident, "other/z.txt": ident, "other/w.txt": ident,
+	}
+	side := map[string]string{
+		"lib/a.txt": ident, "lib/b.txt": ident, "lib/c.txt": ident,
+		"d1/x.txt": ident, "d1/y.txt": ident,
+		"d2/x.txt": ident, "d2/z.txt": ident, "d2/w.txt": ident,
+	}
+	deleted, added := fileDeleteAdds(base, side)
+	taken := matchPerFile(base, side, deleted, added)
+	dirMaj, prefMaj := majorityGroups(deleted, added, taken)
+	if leftoverHasMajority("other/x.txt", dirMaj, prefMaj) {
+		t.Fatal("ambiguous other/ leftover must not be majority-eligible")
+	}
+	assertMatchRenameInvariants(t, base, side)
+	if _, ok := matchRenames(base, side)["other/x.txt"]; ok {
+		t.Fatal("ambiguous other/ leftover must stay unmatched")
+	}
+}
+
 func TestDecodeRenameTreeCapsEnc(t *testing.T) {
 	enc := bytes.Repeat([]byte{0}, fuzzMaxEncBytes+4096)
 	if got := decodeRenameTree(enc); len(got) != 0 {
@@ -177,6 +200,20 @@ func renameFuzzFixtures() []renameFuzzFixture {
 				"vendor/lib/pkg/d.txt": ident, "extra/d.txt": ident,
 			}},
 		{name: "u46-prefix-low-sim", base: map[string]string{"pkg/a.txt": ten, "pkg/b.txt": ident, "pkg/c.txt": ident}, side: map[string]string{"lib/a.txt": unrel, "lib/b.txt": ident, "lib/c.txt": ident}},
+
+		// Independent trees: pkg/ has a unique dir-move majority; other/ is
+		// a 50/50 split. A leftover in other/ must stay unmatched even
+		// though another group has a majority.
+		{name: "mixed-majority-and-split",
+			base: map[string]string{
+				"pkg/a.txt": ident, "pkg/b.txt": ident, "pkg/c.txt": ident,
+				"other/x.txt": ident, "other/y.txt": ident, "other/z.txt": ident, "other/w.txt": ident,
+			},
+			side: map[string]string{
+				"lib/a.txt": ident, "lib/b.txt": ident, "lib/c.txt": ident,
+				"d1/x.txt": ident, "d1/y.txt": ident,
+				"d2/x.txt": ident, "d2/z.txt": ident, "d2/w.txt": ident,
+			}},
 	}
 }
 
@@ -231,15 +268,16 @@ func assertMatchRenameInvariants(t *testing.T, base, side map[string]string) {
 		}
 	}
 
-	if hasUniqueStrictMajorityMap(deleted, added, taken) {
-		return
-	}
+	dirMaj, prefMaj := majorityGroups(deleted, added, taken)
 	for _, d := range deleted {
 		if _, ok := taken[d]; ok {
 			continue
 		}
+		if leftoverHasMajority(d, dirMaj, prefMaj) {
+			continue
+		}
 		if dest, ok := got[d]; ok {
-			t.Fatalf("no unique strict majority, leftover must stay unmatched: %q → %q", d, dest)
+			t.Fatalf("no unique strict majority on %q's parent/prefixes, leftover must stay unmatched: %q → %q", d, d, dest)
 		}
 	}
 }
@@ -273,11 +311,13 @@ func combinedScoreTied(oldPath, target string, cands []string, content func(stri
 	return found && ties > 1
 }
 
-// hasUniqueStrictMajorityMap is an independent majority check over the
-// same votes matchDirRenames / matchFlattenRenest use (taken pair or
-// unique unused same-basename add). If nothing has a unique strict
-// majority, leftovers must stay unmatched.
-func hasUniqueStrictMajorityMap(deleted, added []string, taken map[string]string) bool {
+// majorityGroups is an independent majority check over the same votes
+// matchDirRenames / matchFlattenRenest use (taken pair or unique unused
+// same-basename add). Keys are source parents (dir-move) and prefixes
+// (flatten / re-nest / prefix-replace). A leftover is exempt only when
+// its own parent or one of its prefixes is in those sets — a majority
+// in an unrelated subtree does not excuse inventing a map elsewhere.
+func majorityGroups(deleted, added []string, taken map[string]string) (dirMaj, prefMaj map[string]bool) {
 	usedDest := make(map[string]bool, len(taken))
 	for _, a := range taken {
 		usedDest[a] = true
@@ -330,10 +370,23 @@ func hasUniqueStrictMajorityMap(deleted, added []string, taken map[string]string
 			addVote(xformVotes, pref, renestXform+newP)
 		}
 	}
-	return uniqueStrictMajority(srcCount, dirVotes) || uniqueStrictMajority(prefixCount, xformVotes)
+	return majorityKeys(srcCount, dirVotes), majorityKeys(prefixCount, xformVotes)
 }
 
-func uniqueStrictMajority(count map[string]int, votes map[string]map[string]int) bool {
+func leftoverHasMajority(d string, dirMaj, prefMaj map[string]bool) bool {
+	if dirMaj[pathParent(d)] {
+		return true
+	}
+	for _, pref := range pathPrefixes(d) {
+		if prefMaj[pref] {
+			return true
+		}
+	}
+	return false
+}
+
+func majorityKeys(count map[string]int, votes map[string]map[string]int) map[string]bool {
+	out := map[string]bool{}
 	for key, n := range count {
 		if n < 2 {
 			continue
@@ -348,10 +401,10 @@ func uniqueStrictMajority(count map[string]int, votes map[string]map[string]int)
 			}
 		}
 		if !tied && best != "" && bestN*2 > n {
-			return true
+			out[key] = true
 		}
 	}
-	return false
+	return out
 }
 
 // walkPathPrefixes is an independent parent walk with a hard cap so a
