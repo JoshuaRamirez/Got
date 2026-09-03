@@ -14,6 +14,9 @@ const (
 	fuzzMaxPathLen = 128
 	fuzzMaxContent = 1024
 	fuzzMaxLines   = 64
+	// fuzzMaxEncBytes caps the decoder input before bytes.Split so a
+	// NUL-heavy fuzz buffer cannot allocate a huge part slice.
+	fuzzMaxEncBytes = fuzzMaxFiles * (fuzzMaxPathLen + fuzzMaxContent + 2)
 )
 
 // FuzzMatchRenamesInvariants asserts existing matcher behavior on random
@@ -103,6 +106,13 @@ func TestRenameFuzzSeedCorpus(t *testing.T) {
 			}
 		}
 		assertMatchRenameInvariants(t, base, side)
+	}
+}
+
+func TestDecodeRenameTreeCapsEnc(t *testing.T) {
+	enc := bytes.Repeat([]byte{0}, fuzzMaxEncBytes+4096)
+	if got := decodeRenameTree(enc); len(got) != 0 {
+		t.Fatalf("oversize NUL-only enc must decode empty, got %v", got)
 	}
 }
 
@@ -376,6 +386,9 @@ func encodeRenameTree(m map[string]string) []byte {
 }
 
 func decodeRenameTree(enc []byte) map[string]string {
+	if len(enc) > fuzzMaxEncBytes {
+		enc = enc[:fuzzMaxEncBytes]
+	}
 	parts := bytes.Split(enc, []byte{0})
 	out := make(map[string]string)
 	for i := 0; i+1 < len(parts) && len(out) < fuzzMaxFiles; i += 2 {
